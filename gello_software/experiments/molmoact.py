@@ -1,16 +1,16 @@
-from policy.policy_base import PolicyBase
+from policy_base import PolicyBase
 from typing import List
 import numpy as np
 import time
 import requests
 import json_numpy
 json_numpy.patch()
-from utils.logging_utils import get_molmoact_logger
+from gello_software.gello.utils.logging_utils import get_molmoact_logger
 
 class MolmoAct(PolicyBase):
     def __init__(self):
         self.logger = get_molmoact_logger()
-        self.url = ""
+        self.url = "https://666b74548eba.ngrok-free.app/act"
         self.multi_views = True
         self.action_horizon = 8
 
@@ -139,7 +139,7 @@ class MolmoAct(PolicyBase):
                 # Prepare the payload with the image and instruction from the script
                 payload = {
                     "left_cam": left_img_np,
-                    "front_cam": front_img_np,
+                    "top_cam": front_img_np,
                     "right_cam": right_img_np,
                     "timestamp": time.time(), # add timestamp for debugging
                     "instruction": instruction,
