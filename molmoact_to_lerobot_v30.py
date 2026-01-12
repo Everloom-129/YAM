@@ -54,7 +54,7 @@ import numpy as np
 from PIL import Image
 
 # LeRobot v3.0 API
-from lerobot_v30.src.lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 
 def load_molmoact_data(data_dir: str) -> List[Dict[str, Any]]:

@@ -181,8 +181,8 @@ class RealSenseCamera(CameraDriver):
             if self._device_id is not None:
                 self._config.enable_device(self._device_id)
 
-            self._config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-            self._config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+            self._config.enable_stream(rs.stream.depth, 640, 360, rs.format.z16, 30)
+            self._config.enable_stream(rs.stream.color, 640, 360, rs.format.bgr8, 30)
 
             self._pipeline.start(self._config)
 
