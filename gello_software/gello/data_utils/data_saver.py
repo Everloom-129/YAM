@@ -29,6 +29,13 @@ class DataSaver:
             if remove_dir == "y":
                 shutil.rmtree(self.save_dir)
                 logger.info(f"Removed existing directory: {self.save_dir}.")
+            elif remove_dir == "n":
+                append_dir = input(f"Do you want to append to the existing directory? (y/n): ")
+                if append_dir == "y":
+                    self.traj_count = int(input(f"Enter the next episode number to append to the directory: "))
+                    logger.info(f"Appending to existing directory: {self.save_dir} starting with episode number {self.traj_count}.")
+                else:
+                    raise FileExistsError(f"The directory {self.save_dir} already exists.")
             else:
                 raise FileExistsError(f"The directory {self.save_dir} already exists.")
 
