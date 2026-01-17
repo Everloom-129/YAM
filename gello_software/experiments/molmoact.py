@@ -5,12 +5,12 @@ import time
 import requests
 import json_numpy
 json_numpy.patch()
-from gello_software.gello.utils.logging_utils import get_molmoact_logger
+from gello.utils.logging_utils import get_molmoact_logger
 
 class MolmoAct(PolicyBase):
     def __init__(self):
         self.logger = get_molmoact_logger()
-        self.url = "https://666b74548eba.ngrok-free.app/act"
+        self.url = "https://7fc77f09cb92.ngrok-free.app/act"
         self.multi_views = True
         self.action_horizon = 8
 
@@ -25,17 +25,17 @@ class MolmoAct(PolicyBase):
     def prepare_input(self, obs, instruction):
         self.logger.info("Preparing input for MolmoAct inference")
         self.logger.info(f"Instruction: '{instruction}'")
-        self.logger.info(f"Camera keys - {obs["left_camera_rgb"]}, {obs["front_camera_rgb"]}, {obs["right_camera_rgb"]}")
-        self.logger.info(f"State: {obs["joint_positions"]}")
+        # self.logger.info(f"Camera keys - {obs['left_camera_rgb']}, {obs['front_camera_rgb']}, {obs['right_camera_rgb']}")
+        self.logger.info(f"State: {obs['joint_positions']}")
 
         try:
             # Log image information
-            if hasattr(obs["left_camera_rgb"], 'shape'):
-                self.logger.info(f"Left image shape: {obs["left_camera_rgb"].shape}")
-            if hasattr(obs["front_camera_rgb"], 'shape'):
-                self.logger.info(f"Front image shape: {obs["front_camera_rgb"].shape}")
-            if hasattr(obs["right_camera_rgb"], 'shape'):
-                self.logger.info(f"Right image shape: {obs["right_camera_rgb"].shape}")
+            if hasattr(obs['left_camera_rgb'], 'shape'):
+                self.logger.info(f"Left image shape: {obs['left_camera_rgb'].shape}")
+            if hasattr(obs['front_camera_rgb'], 'shape'):
+                self.logger.info(f"Front image shape: {obs['front_camera_rgb'].shape}")
+            if hasattr(obs['right_camera_rgb'], 'shape'):
+                self.logger.info(f"Right image shape: {obs['right_camera_rgb'].shape}")
 
             input_dict = {
                 "left_camera_rgb": obs["left_camera_rgb"],
