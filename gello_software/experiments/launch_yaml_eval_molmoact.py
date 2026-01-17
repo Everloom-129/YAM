@@ -81,9 +81,9 @@ def main():
     print(f"Found {len(ids)} camera devices")
     print(ids)
     cameras = {
-        "left_camera": RealSenseCamera(ids[0]),
-        "front_camera": RealSenseCamera(ids[1]),
-        "right_camera": RealSenseCamera(ids[2]),
+        "left_camera": RealSenseCamera('218722270092'),
+        "front_camera": RealSenseCamera('336222076815'),
+        "right_camera": RealSenseCamera('218622276072'),
     }
 
     bimanual = args.right_config_path is not None
@@ -149,7 +149,7 @@ def main():
     print(f"Control loop: {cfg.get('hz', 30)} Hz")
 
     molmoact = MolmoAct()
-    run_control_loop_eval(env, policy=molmoact, instruction=left_cfg["language_instruction"])
+    run_control_loop_eval(env, policy=molmoact, instruction=left_cfg["storage"]["language_instruction"])
 
 
 def run_control_loop_eval(
@@ -174,17 +174,18 @@ def run_control_loop_eval(
         log_collect_demos("Running policy inference...", "info")
         start_time = time.time()
         input_dict = policy.prepare_input(obs, instruction)
-        actions = policy.inference(input_dict)
+        actions = policy.inference(input_dict)["actions"]
         inference_time = time.time() - start_time
         log_collect_demos(f"Policy inference completed in {inference_time:.3f}s", "success")
         log_collect_demos(f"Generated {len(actions)} action(s)", "data_info")
-        obs = smooth_move_while_inference_envstep(env, actions)
+        for i in range(len(actions)):
+            obs = smooth_move_while_inference_envstep(env, np.array(actions[i]))
 
 def smooth_move_while_inference_envstep(env: RobotEnv, action):
     current_joint = env.get_obs()["joint_positions"]
     target_joint = action
 
-    steps = 5
+    steps = 20
     obs = None
     for i in range(steps + 1):
         alpha = i / steps  # Interpolation factor
