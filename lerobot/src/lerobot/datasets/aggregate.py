@@ -19,6 +19,7 @@ import logging
 import shutil
 from pathlib import Path
 
+import datasets
 import pandas as pd
 import tqdm
 
@@ -32,6 +33,7 @@ from lerobot.datasets.utils import (
     DEFAULT_VIDEO_FILE_SIZE_IN_MB,
     DEFAULT_VIDEO_PATH,
     get_file_size_in_mb,
+    get_hf_features_from_features,
     get_parquet_file_size_in_mb,
     to_parquet_with_hf_images,
     update_chunk_file_indices,
@@ -136,21 +138,40 @@ def update_meta_data(
         df["_orig_chunk"] = df[orig_chunk_col].copy()
         df["_orig_file"] = df[orig_file_col].copy()
 
-        # Update chunk and file indices to point to destination
-        df[orig_chunk_col] = video_idx["chunk"]
-        df[orig_file_col] = video_idx["file"]
-
-        # Apply per-source-file timestamp offsets
+        # Get mappings for this video key
         src_to_offset = video_idx.get("src_to_offset", {})
-        if src_to_offset:
-            # Apply offset based on original source file
+        src_to_dst = video_idx.get("src_to_dst", {})
+
+        # Apply per-source-file mappings
+        if src_to_dst:
+            # Map each episode to its correct destination file and apply offset
             for idx in df.index:
-                src_key = (df.at[idx, "_orig_chunk"], df.at[idx, "_orig_file"])
+                # Convert to Python int to avoid numpy type mismatch in dict lookup
+                src_key = (int(df.at[idx, "_orig_chunk"]), int(df.at[idx, "_orig_file"]))
+
+                # Get destination chunk/file for this source file
+                dst_chunk, dst_file = src_to_dst.get(src_key, (video_idx["chunk"], video_idx["file"]))
+                df.at[idx, orig_chunk_col] = dst_chunk
+                df.at[idx, orig_file_col] = dst_file
+
+                # Apply timestamp offset
+                offset = src_to_offset.get(src_key, 0)
+                df.at[idx, f"videos/{key}/from_timestamp"] += offset
+                df.at[idx, f"videos/{key}/to_timestamp"] += offset
+        elif src_to_offset:
+            # Fallback: use same destination for all, but apply per-file offsets
+            df[orig_chunk_col] = video_idx["chunk"]
+            df[orig_file_col] = video_idx["file"]
+            for idx in df.index:
+                # Convert to Python int to avoid numpy type mismatch in dict lookup
+                src_key = (int(df.at[idx, "_orig_chunk"]), int(df.at[idx, "_orig_file"]))
                 offset = src_to_offset.get(src_key, 0)
                 df.at[idx, f"videos/{key}/from_timestamp"] += offset
                 df.at[idx, f"videos/{key}/to_timestamp"] += offset
         else:
             # Fallback to simple offset (for backward compatibility)
+            df[orig_chunk_col] = video_idx["chunk"]
+            df[orig_file_col] = video_idx["file"]
             df[f"videos/{key}/from_timestamp"] = (
                 df[f"videos/{key}/from_timestamp"] + video_idx["latest_duration"]
             )
@@ -268,6 +289,12 @@ def aggregate_videos(src_meta, dst_meta, videos_idx, video_files_size_in_mb, chu
         videos_idx[key]["episode_duration"] = 0
         # Track offset for each source (chunk, file) pair
         videos_idx[key]["src_to_offset"] = {}
+        # Track destination (chunk, file) for each source (chunk, file) pair
+        videos_idx[key]["src_to_dst"] = {}
+        # Initialize dst_file_durations if not present
+        # dst_file_durations tracks duration of each destination file
+        if "dst_file_durations" not in videos_idx[key]:
+            videos_idx[key]["dst_file_durations"] = {}
 
     for key, video_idx in videos_idx.items():
         unique_chunk_file_pairs = {
@@ -282,9 +309,13 @@ def aggregate_videos(src_meta, dst_meta, videos_idx, video_files_size_in_mb, chu
 
         chunk_idx = video_idx["chunk"]
         file_idx = video_idx["file"]
-        current_offset = video_idx["latest_duration"]
+        dst_file_durations = video_idx["dst_file_durations"]
 
         for src_chunk_idx, src_file_idx in unique_chunk_file_pairs:
+            # Convert to Python int to ensure consistent dict keys
+            src_chunk_idx = int(src_chunk_idx)
+            src_file_idx = int(src_file_idx)
+
             src_path = src_meta.root / DEFAULT_VIDEO_PATH.format(
                 video_key=key,
                 chunk_index=src_chunk_idx,
@@ -298,14 +329,17 @@ def aggregate_videos(src_meta, dst_meta, videos_idx, video_files_size_in_mb, chu
             )
 
             src_duration = get_video_duration_in_s(src_path)
+            dst_key = (chunk_idx, file_idx)
 
             if not dst_path.exists():
-                # Store offset before incrementing
-                videos_idx[key]["src_to_offset"][(src_chunk_idx, src_file_idx)] = current_offset
+                # New destination file: offset is 0
+                videos_idx[key]["src_to_offset"][(src_chunk_idx, src_file_idx)] = 0
+                videos_idx[key]["src_to_dst"][(src_chunk_idx, src_file_idx)] = dst_key
                 dst_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(str(src_path), str(dst_path))
+                # Track duration of this destination file
+                dst_file_durations[dst_key] = src_duration
                 videos_idx[key]["episode_duration"] += src_duration
-                current_offset += src_duration
                 continue
 
             # Check file sizes before appending
@@ -313,10 +347,11 @@ def aggregate_videos(src_meta, dst_meta, videos_idx, video_files_size_in_mb, chu
             dst_size = get_file_size_in_mb(dst_path)
 
             if dst_size + src_size >= video_files_size_in_mb:
-                # Rotate to a new file, this source becomes start of new destination
-                # So its offset should be 0
-                videos_idx[key]["src_to_offset"][(src_chunk_idx, src_file_idx)] = 0
+                # Rotate to a new file - offset is 0
                 chunk_idx, file_idx = update_chunk_file_indices(chunk_idx, file_idx, chunk_size)
+                dst_key = (chunk_idx, file_idx)
+                videos_idx[key]["src_to_offset"][(src_chunk_idx, src_file_idx)] = 0
+                videos_idx[key]["src_to_dst"][(src_chunk_idx, src_file_idx)] = dst_key
                 dst_path = dst_meta.root / DEFAULT_VIDEO_PATH.format(
                     video_key=key,
                     chunk_index=chunk_idx,
@@ -324,16 +359,20 @@ def aggregate_videos(src_meta, dst_meta, videos_idx, video_files_size_in_mb, chu
                 )
                 dst_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(str(src_path), str(dst_path))
-                # Reset offset for next file
-                current_offset = src_duration
+                # Track duration of this new destination file
+                dst_file_durations[dst_key] = src_duration
             else:
-                # Append to existing video file - use current accumulated offset
-                videos_idx[key]["src_to_offset"][(src_chunk_idx, src_file_idx)] = current_offset
+                # Append to existing destination file
+                # Offset is the current duration of this destination file
+                current_dst_duration = dst_file_durations.get(dst_key, 0)
+                videos_idx[key]["src_to_offset"][(src_chunk_idx, src_file_idx)] = current_dst_duration
+                videos_idx[key]["src_to_dst"][(src_chunk_idx, src_file_idx)] = dst_key
                 concatenate_video_files(
                     [dst_path, src_path],
                     dst_path,
                 )
-                current_offset += src_duration
+                # Update duration of this destination file
+                dst_file_durations[dst_key] = current_dst_duration + src_duration
 
             videos_idx[key]["episode_duration"] += src_duration
 
@@ -365,12 +404,21 @@ def aggregate_data(src_meta, dst_meta, data_idx, data_files_size_in_mb, chunk_si
     }
 
     unique_chunk_file_ids = sorted(unique_chunk_file_ids)
+    contains_images = len(dst_meta.image_keys) > 0
+
+    # retrieve features schema for proper image typing in parquet
+    hf_features = get_hf_features_from_features(dst_meta.features) if contains_images else None
 
     for src_chunk_idx, src_file_idx in unique_chunk_file_ids:
         src_path = src_meta.root / DEFAULT_DATA_PATH.format(
             chunk_index=src_chunk_idx, file_index=src_file_idx
         )
-        df = pd.read_parquet(src_path)
+        if contains_images:
+            # Use HuggingFace datasets to read source data to preserve image format
+            src_ds = datasets.Dataset.from_parquet(str(src_path))
+            df = src_ds.to_pandas()
+        else:
+            df = pd.read_parquet(src_path)
         df = update_data_df(df, src_meta, dst_meta)
 
         data_idx = append_or_create_parquet_file(
@@ -380,8 +428,9 @@ def aggregate_data(src_meta, dst_meta, data_idx, data_files_size_in_mb, chunk_si
             data_files_size_in_mb,
             chunk_size,
             DEFAULT_DATA_PATH,
-            contains_images=len(dst_meta.image_keys) > 0,
+            contains_images=contains_images,
             aggr_root=dst_meta.root,
+            hf_features=hf_features,
         )
 
     return data_idx
@@ -451,6 +500,7 @@ def append_or_create_parquet_file(
     default_path: str,
     contains_images: bool = False,
     aggr_root: Path = None,
+    hf_features: datasets.Features | None = None,
 ):
     """Appends data to an existing parquet file or creates a new one based on size constraints.
 
@@ -466,6 +516,7 @@ def append_or_create_parquet_file(
         default_path: Format string for generating file paths.
         contains_images: Whether the data contains images requiring special handling.
         aggr_root: Root path for the aggregated dataset.
+        hf_features: Optional HuggingFace Features schema for proper image typing.
 
     Returns:
         dict: Updated index dictionary with current chunk and file indices.
@@ -475,7 +526,7 @@ def append_or_create_parquet_file(
     if not dst_path.exists():
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         if contains_images:
-            to_parquet_with_hf_images(df, dst_path)
+            to_parquet_with_hf_images(df, dst_path, features=hf_features)
         else:
             df.to_parquet(dst_path)
         return idx
@@ -490,12 +541,17 @@ def append_or_create_parquet_file(
         final_df = df
         target_path = new_path
     else:
-        existing_df = pd.read_parquet(dst_path)
+        if contains_images:
+            # Use HuggingFace datasets to read existing data to preserve image format
+            existing_ds = datasets.Dataset.from_parquet(str(dst_path))
+            existing_df = existing_ds.to_pandas()
+        else:
+            existing_df = pd.read_parquet(dst_path)
         final_df = pd.concat([existing_df, df], ignore_index=True)
         target_path = dst_path
 
     if contains_images:
-        to_parquet_with_hf_images(final_df, target_path)
+        to_parquet_with_hf_images(final_df, target_path, features=hf_features)
     else:
         final_df.to_parquet(target_path)
 
