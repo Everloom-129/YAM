@@ -2,7 +2,10 @@ import argparse
 import time
 import curses
 import numpy as np
+import sys
+sys.path.append("/home/sean/Desktop/YAM/i2rt")
 from i2rt.motor_drivers.dm_driver import DMChainCanInterface
+from i2rt.motor_drivers.utils import ReceiveMode
 
 def main(stdscr):
     parser = argparse.ArgumentParser()
@@ -18,7 +21,7 @@ def main(stdscr):
 
     motor_list = [[args.motor_id, args.motor_type]]
     motor_directions = [1]
-    motor_chain = DMChainCanInterface(motor_list, [0], motor_directions, channel=args.channel, receive_mode=args.can_receive_mode)
+    motor_chain = DMChainCanInterface(motor_list, [0], motor_directions, channel=args.channel, receive_mode=ReceiveMode.p16)
 
     # Read current position and use it as initial target
     motor_states = motor_chain.read_states()
@@ -104,7 +107,8 @@ def main(stdscr):
                 stdscr.addstr(6, 0, f"Error code  : {err}")
                 stdscr.addstr(8, 0, f"Step size   : {step:.5f} rad   (↑ bigger / ↓ smaller)")
                 stdscr.addstr(9, 0, f"KP={args.kp:.2f}  KD={args.kd:.2f}")
-                stdscr.addstr(11, 0, "Controls: ←/→ move • r reset-to-current • SPACE hold • q quit")
+                # stdscr.addstr(11, 0, "Controls: ←/→ move • r reset-to-current • SPACE hold • q quit")
+                stdscr.addstr(11, 0, "Controls: <-/-> move, r reset, SPACE hold, q quit")
                 stdscr.refresh()
                 last_print = now
 
@@ -130,4 +134,6 @@ def main(stdscr):
             pass
 
 if __name__ == "__main__":
+    import os
+    os.environ.setdefault("TERM", "xterm-256color")
     curses.wrapper(main)
