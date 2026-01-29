@@ -23,7 +23,8 @@ class YAMRobot(Robot):
             "joint6",
             "gripper",
         ]
-        self._joint_state = np.zeros(7)  # 7 joints
+        self._joint_state = self.get_joint_state()  # 7 joints
+        # self._joint_state = np.zeros(7)  # 7 joints
         self._joint_velocities = np.zeros(7)  # 7 joints
         self._gripper_state = 0.0
 
