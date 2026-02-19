@@ -1,25 +1,31 @@
 import atexit
+from math import inf
+from multiprocessing import Process
+import os
 import signal
 from dataclasses import dataclass
+from pathlib import Path
 import time
-from typing import Any, Optional
+from typing import Optional
 
 from PIL import Image
+from PIL.Image import logger
+from molmoact import MolmoAct
 import torch
 import tyro
 from omegaconf import OmegaConf
 
 from gello.utils.launch_utils import instantiate_from_dict, move_to_start_position
+from gello.dynamixel.driver import DynamixelDriver
 import numpy as np
 
-from gello.cameras.realsense_camera import RealSenseCamera, get_device_ids
+from gello.data_utils.data_replay import DataReplayer
 from gello.env import RobotEnv
 from gello.utils.logging_utils import log_collect_demos
-from molmoact import MolmoAct
-import logging
-import os
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+
+from gello.cameras.realsense_camera import RealSenseCamera, get_device_ids
+from gello.data_utils.data_saver_iter import DataSaver
+from gello.data_utils.data_saver_thread import EpisodeSaverThread
 DEVICE = os.environ.get("LEROBOT_TEST_DEVICE", "cuda") if torch.cuda.is_available() else "cpu"
 
 # Global variables for cleanup
@@ -43,6 +49,7 @@ def cleanup():
         move_to_start_position(_env, _bimanual, _left_cfg, _right_cfg)
     else:
         move_to_start_position(_env, _bimanual, _left_cfg)
+
     print("Cleanup completed.")
 
 
@@ -76,14 +83,11 @@ def main():
 
     args = tyro.cli(Args)
 
-    # left, right front camera (the device id order is based on the plugged in order on the adapter)
     ids = get_device_ids()
     print(f"Found {len(ids)} camera devices")
     print(ids)
     cameras = {
-        "left_camera": RealSenseCamera('218722270092'),
-        "front_camera": RealSenseCamera('336222076815'),
-        "right_camera": RealSenseCamera('218622276072'),
+        "record_camera": RealSenseCamera("234222300688")
     }
 
     bimanual = args.right_config_path is not None
@@ -92,11 +96,12 @@ def main():
     left_cfg = OmegaConf.to_container(
         OmegaConf.load(args.left_config_path), resolve=True
     )
-
     if bimanual:
         right_cfg = OmegaConf.to_container(
             OmegaConf.load(args.right_config_path), resolve=True
         )
+
+    data_saver = DataSaver(save_dir=left_cfg['storage']['base_dir'], task_directory=left_cfg['storage']['task_directory'])
 
     # Create robot(s)
     left_robot_cfg = left_cfg["robot"]
@@ -125,7 +130,6 @@ def main():
         robot = left_robot
         cfg = left_cfg
 
-    from gello.env import RobotEnv
     env = RobotEnv(robot, control_rate_hz=cfg.get("hz", 30), camera_dict=cameras)
 
     # Store global variables for cleanup
@@ -148,44 +152,75 @@ def main():
     )
     print(f"Control loop: {cfg.get('hz', 30)} Hz")
 
+    logger.info("Start open loop evaluation...")
+    task = input("Enter task to replay: ")
+    episode_number = int(input("Enter episode number to replay: "))
+
+    data_replayer = DataReplayer(save_format=left_cfg['storage']['save_format'], old_format=left_cfg['storage']['old_format'])
+    data_replayer.load_episode(left_cfg['storage']['base_dir'] + '/' + task, episode_number)
+    
     molmoact = MolmoAct()
-    run_control_loop_eval(env, policy=molmoact, instruction=left_cfg["storage"]["language_instruction"])
+    if bimanual:
+        run_control_loop_eval_open_loop(env, policy=molmoact, data_replayer=data_replayer, data_saver=data_saver, instruction=left_cfg["storage"]["language_instruction"])
+    else:
+        run_control_loop_eval_open_loop(env, policy=molmoact, data_replayer=data_replayer, data_saver=data_saver, instruction=left_cfg["storage"]["language_instruction"])
 
-
-def run_control_loop_eval(
+def run_control_loop_eval_open_loop(
     env: RobotEnv,
     policy: MolmoAct = None,
+    data_replayer: DataReplayer = None,
+    data_saver: DataSaver = None,
     instruction: str = None,
 ) -> None:
     """Run the main control loop.
-
-    Args:
-        env: Robot environment
-        agent: Agent for control
-        save_interface: Optional save interface for data collection
-        print_timing: Whether to print timing information
-        use_colors: Whether to use colored terminal output
     """
-    start_time = time.time()
-    obs = env.get_obs()
-    logger.info("Starting policy inference...")
+    saver_thread = EpisodeSaverThread(data_saver)
+    saver_thread.start()
 
-    while True:
+    logger.info("Starting policy inference...")
+    # Init environment and warm up agent
+    obs = env.get_obs()
+    obs_store = {}
+    obs_store["record_camera_rgb"] = obs["record_camera_rgb"].copy()
+    obs_store["iteration"] = 0
+    data_saver.add_observation(obs_store)
+
+    # Main control loop
+    demo_length = data_replayer.get_demo_length()
+    obs_index = 0
+    while obs_index < demo_length:
+        obs = data_replayer.get_observation(obs_index)
+        input_dict = {
+            "left_camera_rgb": obs["image_left_rgb"],
+            "front_camera_rgb": obs["image_front_rgb"],
+            "right_camera_rgb": obs["image_right_rgb"],
+            "instruction": instruction,
+            "state": np.concatenate([obs["left_joint"], obs["right_joint"]])
+        }
         log_collect_demos("Running policy inference...", "info")
-        input_dict = policy.prepare_input(obs, instruction)
         start_time = time.time()
-        actions = policy.inference(input_dict)["actions"]
+        response_dict = policy.inference(input_dict)
         inference_time = time.time() - start_time
+        actions = response_dict["actions"]
         log_collect_demos(f"Policy inference completed in {inference_time:.3f}s", "success")
         log_collect_demos(f"Generated {len(actions)} action(s)", "data_info")
         for i in range(len(actions)):
             obs = smooth_move_while_inference_envstep(env, np.array(actions[i]))
+            obs_store["record_camera_rgb"] = obs["record_camera_rgb"].copy()
+            obs_store["iteration"] = response_dict["iteration"]
+            data_saver.add_observation(obs_store)
+        obs_index += 8
+    logger.info("Finished policy inference")
+
+    saver_thread.save_episode(data_saver.buffer.copy())
+    while True:
+        logger.info("saving..")
 
 def smooth_move_while_inference_envstep(env: RobotEnv, action):
     current_joint = env.get_obs()["joint_positions"]
     target_joint = action
 
-    steps = 5
+    steps = 20
     obs = None
     for i in range(steps + 1):
         alpha = i / steps  # Interpolation factor
@@ -194,7 +229,6 @@ def smooth_move_while_inference_envstep(env: RobotEnv, action):
         time.sleep(0.5 / steps)
 
     return obs
-
 
 if __name__ == "__main__":
     main()

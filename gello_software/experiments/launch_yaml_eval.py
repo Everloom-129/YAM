@@ -87,9 +87,9 @@ def main():
     print(f"Found {len(ids)} camera devices")
     print(ids)
     cameras = {
-        "left_camera": RealSenseCamera(ids[0]),
-        "front_camera": RealSenseCamera(ids[1]),
-        "right_camera": RealSenseCamera(ids[2]),
+        "left_camera": RealSenseCamera('218722270092'),
+        "front_camera": RealSenseCamera('336222076815'),
+        "right_camera": RealSenseCamera('218622276072'),
     }
 
     bimanual = args.right_config_path is not None
@@ -288,11 +288,11 @@ def run_control_loop_eval_pi(
             if task is not None:
                 observation["task"] = [task]
             
-            inference_start = time.time()
-            
             # Preprocess and run inference
             observation = preprocessor(observation)
+            inference_start = time.time()
             actions_chunk = policy.predict_action_chunk(observation)  # Returns [1, 50, 14] (full chunk)
+            inference_time = time.time() - inference_start
             actions_chunk = actions_chunk[:, :actions_per_chunk, :]  # Take only first 30 actions
             
             # Apply postprocessor to each action in the chunk (postprocessor expects (B, action_dim))
@@ -306,7 +306,6 @@ def run_control_loop_eval_pi(
             # Stack back and convert to numpy
             actions_chunk = torch.stack(processed_actions, dim=1).squeeze(0).detach().cpu().numpy()  # [30, 14]
             
-            inference_time = time.time() - inference_start
             log_collect_demos(f"Policy inference completed in {inference_time:.3f}s, generated {len(actions_chunk)} actions", "success")
             
             # Add all actions to queue
@@ -319,44 +318,44 @@ def run_control_loop_eval_pi(
         if sleep_time > 0:
             time.sleep(sleep_time)
 
-def run_control_loop_eval_dit(
-    env: RobotEnv,
-    policy: DiffusionPolicy = None,
-    preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]] = None,
-    postprocessor: PolicyProcessorPipeline[PolicyAction, PolicyAction] = None,
-    ds_meta: LeRobotDatasetMetadata = None,
-) -> None:
-    """Run the main control loop.
+# def run_control_loop_eval_dit(
+#     env: RobotEnv,
+#     policy: DiffusionPolicy = None,
+#     preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]] = None,
+#     postprocessor: PolicyProcessorPipeline[PolicyAction, PolicyAction] = None,
+#     ds_meta: LeRobotDatasetMetadata = None,
+# ) -> None:
+#     """Run the main control loop.
 
-    Args:
-        env: Robot environment
-        agent: Agent for control
-        save_interface: Optional save interface for data collection
-        print_timing: Whether to print timing information
-        use_colors: Whether to use colored terminal output
-    """
-    start_time = time.time()
-    obs = env.get_obs()
-    policy.reset()
-    logger.info("Starting policy inference...")
+#     Args:
+#         env: Robot environment
+#         agent: Agent for control
+#         save_interface: Optional save interface for data collection
+#         print_timing: Whether to print timing information
+#         use_colors: Whether to use colored terminal output
+#     """
+#     start_time = time.time()
+#     obs = env.get_obs()
+#     policy.reset()
+#     logger.info("Starting policy inference...")
 
-    while True:
-        observation = preprocess_observation(obs)
-        # observation = {key: observation[key].to(DEVICE, non_blocking=True) for key in observation}
-        observation = {
-            key: value.to(DEVICE, non_blocking=True) if torch.is_tensor(value) else value
-            for key, value in observation.items()
-        }
-        log_collect_demos("Running policy inference...", "info")
-        start_time = time.time()
-        observation = preprocessor(observation)
-        actions = policy.select_action(observation)
-        actions = postprocessor(actions)
-        actions = actions.squeeze(0).detach().cpu().numpy()
-        inference_time = time.time() - start_time
-        log_collect_demos(f"Policy inference completed in {inference_time:.3f}s", "success")
-        log_collect_demos(f"Generated {len(actions)} action(s)", "data_info")
-        obs = smooth_move_while_inference_envstep(env, actions, steps=5)
+#     while True:
+#         observation = preprocess_observation(obs)
+#         # observation = {key: observation[key].to(DEVICE, non_blocking=True) for key in observation}
+#         observation = {
+#             key: value.to(DEVICE, non_blocking=True) if torch.is_tensor(value) else value
+#             for key, value in observation.items()
+#         }
+#         log_collect_demos("Running policy inference...", "info")
+#         start_time = time.time()
+#         observation = preprocessor(observation)
+#         actions = policy.select_action(observation)
+#         actions = postprocessor(actions)
+#         actions = actions.squeeze(0).detach().cpu().numpy()
+#         inference_time = time.time() - start_time
+#         log_collect_demos(f"Policy inference completed in {inference_time:.3f}s", "success")
+#         log_collect_demos(f"Generated {len(actions)} action(s)", "data_info")
+#         obs = smooth_move_while_inference_envstep(env, actions, steps=5)
 
 def run_control_loop_eval(
     env: RobotEnv,
@@ -380,8 +379,11 @@ def run_control_loop_eval(
 
     while True:
         observation = preprocess_observation(obs)
-        # observation = {key: observation[key].to(DEVICE, non_blocking=True) for key in observation}
         observation = {key: observation[key].to(DEVICE, non_blocking=True) for key in observation}
+        # observation = {
+        #     key: value.to(DEVICE, non_blocking=True) if torch.is_tensor(value) else value
+        #     for key, value in observation.items()
+        # }
         log_collect_demos("Running policy inference...", "info")
         observation = preprocessor(observation)
         start_time = time.time()
@@ -439,7 +441,7 @@ def preprocess_observation(observations: dict[str, np.ndarray]) -> dict[str, tor
     return_observations["observation.state"] = state_tensor
 
     # for dit only
-    # return_observations["task"] = "put the cube into the square"
+    # return_observations["task"] = "wipe the dish"
 
     return return_observations
 
