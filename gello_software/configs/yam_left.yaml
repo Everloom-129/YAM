@@ -24,16 +24,17 @@ collection:
 
 # Data storage configuration
 storage:
-  episodes: 50
-  base_dir: "/home/sean/Desktop/YAM/gello_software/data"
-  task_directory: "stack_cubes"
-  language_instruction: "stack cubes"
+  episodes: 30
+  base_dir: "/home/sean/Desktop/YAM/gello_software/data_recurrent"
+  task_directory: "test"
+  language_instruction: "stack cube into pyramid"
   teleop_device: "oculus" # ["oculus", "keyboard", "gello", "none"]
   save_format: "json" # ["json", "npy"]
   old_format: false
 
 # Policy configuration
 policy:
-  _target_: lerobot.common.policies.diffusion.configuration_diffusion.DiffusionConfig
-  repo_id: "/home/sean/Desktop/YAM/lerobot_v30/src/lerobot/datasets/yam_fold_towel_dp_dataset_v3_test"
-  checkpoint_path: "hqfang/nov22-yam-fold_towel-ditx-vit-clip-flow_matching"
+  # _target_: lerobot.policies.pi05.configuration_pi05.PI05Config
+  type: "dp"
+  repo_id: "williamtsai726/stop_the_rolling_glue_0206"
+  checkpoint_path: "/home/sean/Desktop/YAM/lerobot/outputs/stop_the_rolling_glue_0206/checkpoints/100000/pretrained_model"
