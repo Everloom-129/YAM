@@ -1,6 +1,13 @@
 # YAM 
 Teleoperation, Data Collection, and model evaluation on Bimanual YAM.  
 
+# Motor Configuration
+For long time bimanual teleop, data collection, or evaluation, the default timeout is too short and often causes abrupt collapse. To prevent that, we turn off the motor timeout for both arms.
+```
+python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_left
+python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_right
+```
+
 ## Gello Configuration
 Everything for gello is located in gello_software.
 ```
@@ -60,6 +67,24 @@ Press ```b``` to end and delete collected episode and the color pad will turn re
 
 Note: make sure you are on the color pad so it can take in the keyboard input. (don't put it in the background). But to kill the program with ```ctrl+c```, you will need to be on cursor.
 If not, the color pad will obsorb the keyboard command and the program will not be killed. 
+
+### Data Converstion
+Currently, the data is saved in json format. We would eventually convert them into lerobot v3.0. To do that, we can run the ```molmoact_to_lerobot_v30.py``` script.
+```
+python molmoact_to_lerobot_v30.py \
+        --data_dir /path/to/molmoact \
+        --output_dir /path/to/molmoact_lerobot_v30 \
+        --repo_id your_huggingface_user/molmoact_v30 \
+        --fps 10
+```
+After successful conversion, upload it to huggingface.
+```
+hf upload huggingface_user/dataset_name /path/to/local_lerobot_v30_dataset --repo-type=dataset
+```
+For some reason, the version tag needs to be added manually...
+```
+python add_tag.py --repo_id huggingface_user/dataset_name
+```
 
 ### Model Evaluation
 To perform evaluation, we need to change the content of the configuration file ```configs/yam_left.yaml```.
