@@ -1,6 +1,13 @@
 # YAM 
 Teleoperation, Data Collection, and model evaluation on Bimanual YAM.  
 
+# Motor Configuration
+For long time bimanual teleop, data collection, or evaluation, the default timeout is too short and often causes abrupt collapse. To prevent that, we turn off the motor timeout for both arms.
+```
+python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_left
+python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_right
+```
+
 ## Gello Configuration
 Everything for gello is located in gello_software.
 ```
