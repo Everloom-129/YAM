@@ -68,7 +68,7 @@ Press ```b``` to end and delete collected episode and the color pad will turn re
 Note: make sure you are on the color pad so it can take in the keyboard input. (don't put it in the background). But to kill the program with ```ctrl+c```, you will need to be on cursor.
 If not, the color pad will obsorb the keyboard command and the program will not be killed. 
 
-## Data Converstion
+### Data Converstion
 Currently, the data is saved in json format. We would eventually convert them into lerobot v3.0. To do that, we can run the ```molmoact_to_lerobot_v30.py``` script.
 ```
 python molmoact_to_lerobot_v30.py \
