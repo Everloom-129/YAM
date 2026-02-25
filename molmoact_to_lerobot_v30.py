@@ -34,6 +34,12 @@ Usage example:
         --output_dir /path/to/molmoact_lerobot_v30 \
         --repo_id your-user/molmoact_v30 \
         --fps 10
+    
+    python molmoact_to_lerobot_v30.py \
+        --data_dir /home/sean/Desktop/YAM/gello_software/data/fold_towel \
+        --output_dir /home/sean/Desktop/YAM/gello_software/data/fold_towel_lerobot_v30 \
+        --repo_id williamtsai726/fold_towel_video_0224 \
+        --fps 10
 
     hf upload williamtsai726/stop_the_rolling_glue_rlds_0203 ./stop_the_rolling_glue_rlds --repo-type=dataset
 
@@ -41,10 +47,10 @@ You can then train with:
 
     # diffusion policy
     python src/lerobot/scripts/lerobot_train.py \
-            --dataset.repo_id=williamtsai726/stop_the_rolling_glue_0206 \
+            --dataset.repo_id=williamtsai726/fold_towel_video_0224     \
             --policy.type=diffusion \
-            --policy.repo_id=williamtsai726/stop_the_rolling_glue_0206 \
-            --output_dir=./outputs/stop_the_rolling_glue_0206 \
+            --policy.repo_id=williamtsai726/fold_towel_0224 \
+            --output_dir=./outputs/test \
             --save_after_step=60000 \
             --steps=100000 \
             
@@ -76,6 +82,44 @@ from tqdm import trange
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 
+STATE_DIM_NAMES = [
+    "left_joint1",
+    "left_joint2",
+    "left_joint3",
+    "left_joint4",
+    "left_joint5",
+    "left_joint6",
+    "left_gripper",
+    "right_joint1",
+    "right_joint2",
+    "right_joint3",
+    "right_joint4",
+    "right_joint5",
+    "right_joint6",
+    "right_gripper",
+]
+
+
+def _sorted_image_files(camera_dir: Path) -> List[Path]:
+    """Sort images by numeric stem when possible, fallback to lexical order."""
+    image_files = [f for f in camera_dir.iterdir() if f.suffix.lower() in [".png", ".jpg", ".jpeg"]]
+
+    def _key(path: Path):
+        stem = path.stem
+        return (0, int(stem)) if stem.isdigit() else (1, stem)
+
+    return sorted(image_files, key=_key)
+
+
+def _extract_task_text(frame: Dict[str, Any]) -> str | None:
+    """Extract task text from common MolmoAct keys."""
+    for key in ("task", "instruction", "language_instruction"):
+        value = frame.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def load_molmoact_data(data_dir: str) -> List[Dict[str, Any]]:
     """
     Load MolmoAct episodes, but store image PATHS instead of pixel data
@@ -103,20 +147,24 @@ def load_molmoact_data(data_dir: str) -> List[Dict[str, Any]]:
             continue
 
         first_frame = episode_data[0]
-        task_description = first_frame.get("task", f"task_{episode_id}")
+        task_description = _extract_task_text(first_frame)
 
         # Joint positions and Actions
         left_joint = np.array([json.loads(f["left_joint"]) for f in episode_data], dtype=np.float32)
         right_joint = np.array([json.loads(f["right_joint"]) for f in episode_data], dtype=np.float32)
-        
-        qpos = np.concatenate([left_joint, right_joint], axis=1)   # (T, 14)
-        actions = qpos.copy() # Standard practice for MolmoAct to v2.1/v3.0
+        has_next_joint = all(("next_left_joint" in f and "next_right_joint" in f) for f in episode_data)
+        next_qpos = None
+        if has_next_joint:
+            next_left_joint = np.array([json.loads(f["next_left_joint"]) for f in episode_data], dtype=np.float32)
+            next_right_joint = np.array([json.loads(f["next_right_joint"]) for f in episode_data], dtype=np.float32)
+            next_qpos = np.concatenate([next_left_joint, next_right_joint], axis=1)  # (T, 14)
 
+        qpos = np.concatenate([left_joint, right_joint], axis=1)   # (T, 14)
         episode_info: Dict[str, Any] = {
             "task_description": task_description,
             "qpos": qpos,
-            "actions": actions,
-            "episode_length": len(actions),
+            "next_qpos": next_qpos,
+            "episode_length": len(qpos),
             "camera_paths": {}, # Changed from "images": [] to a path map
         }
 
@@ -125,9 +173,7 @@ def load_molmoact_data(data_dir: str) -> List[Dict[str, Any]]:
                 continue
 
             cam_name = camera_dir.name.replace("_rgb", "")
-            image_files = sorted(
-                [f for f in camera_dir.iterdir() if f.suffix.lower() in [".png", ".jpg", ".jpeg"]]
-            )
+            image_files = _sorted_image_files(camera_dir)
             # Store only the paths to keep RAM usage near zero here
             episode_info["camera_paths"][cam_name] = image_files
 
@@ -137,24 +183,139 @@ def load_molmoact_data(data_dir: str) -> List[Dict[str, Any]]:
     return episodes
 
 
-def infer_camera_shapes(episodes: List[Dict[str, Any]]) -> Dict[str, Tuple[int, int, int]]:
-    """Inspect exactly one image to determine H, W, C for the schema."""
+def infer_camera_shapes(episodes: List[Dict[str, Any]], camera_names: List[str]) -> Dict[str, Tuple[int, int, int]]:
+    """Inspect one image per camera to determine H, W, C for the schema."""
+    camera_shapes: Dict[str, Tuple[int, int, int]] = {}
     for ep in episodes:
-        for cam_name, paths in ep["camera_paths"].items():
-            if paths:
+        for cam_name in camera_names:
+            paths = ep["camera_paths"].get(cam_name, [])
+            if cam_name not in camera_shapes and paths:
                 with Image.open(paths[0]) as img:
                     w, h = img.size
                     c = len(img.getbands())
-                    return {"left": (h, w, c), "right": (h, w, c), "front": (h, w, c)}
-    return {"left": (360, 640, 3), "right": (360, 640, 3), "front": (360, 640, 3)}
+                    camera_shapes[cam_name] = (h, w, c)
+        if len(camera_shapes) == len(camera_names):
+            return camera_shapes
+
+    for cam_name in camera_names:
+        camera_shapes.setdefault(cam_name, (360, 640, 3))
+    return camera_shapes
 
 
-def create_lerobot_dataset_v30(episodes, output_dir, repo_id, fps, robot_type):
+def infer_common_cameras(episodes: List[Dict[str, Any]]) -> List[str]:
+    """Use only cameras available (with at least 1 frame) in every episode."""
+    if not episodes:
+        return []
+
+    common = None
+    for ep in episodes:
+        ep_cams = {cam for cam, paths in ep["camera_paths"].items() if len(paths) > 0}
+        common = ep_cams if common is None else common & ep_cams
+
+    return sorted(common) if common else []
+
+
+def build_actions_from_episode(ep_data: Dict[str, Any], action_mode: str) -> np.ndarray:
+    """Build action array aligned with observation.state semantics."""
+    qpos = ep_data["qpos"]
+
+    if action_mode == "next_joint_fields":
+        next_qpos = ep_data.get("next_qpos")
+        if isinstance(next_qpos, np.ndarray):
+            if next_qpos.shape != qpos.shape:
+                raise ValueError(
+                    f"next_qpos shape mismatch: {next_qpos.shape} vs qpos {qpos.shape}"
+                )
+            return next_qpos.copy()
+        # Fallback for datasets that do not have next_* fields.
+        action_mode = "next_state"
+
+    if action_mode == "copy_state":
+        return qpos.copy()
+
+    if action_mode == "next_state":
+        if len(qpos) == 0:
+            return qpos.copy()
+        actions = np.empty_like(qpos)
+        actions[:-1] = qpos[1:]
+        actions[-1] = qpos[-1]
+        return actions
+
+    raise ValueError(f"Unsupported action_mode: {action_mode}")
+
+
+def resolve_global_task(episodes: List[Dict[str, Any]], task_instruction: str | None) -> str:
+    """Resolve one task string to use across all episodes."""
+    if task_instruction and task_instruction.strip():
+        return task_instruction.strip()
+
+    for ep in episodes:
+        candidate = ep.get("task_description")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+
+    return "perform the task"
+
+
+def sanitize_episode_metadata_for_online_viz(output_dir: str) -> None:
+    """Drop quantile-only columns from episode metadata for broader viewer compatibility."""
+    try:
+        import pandas as pd
+    except Exception:
+        print("Warning: pandas unavailable; skipping metadata sanitization.")
+        return
+
+    episodes_root = Path(output_dir) / "meta" / "episodes"
+    if not episodes_root.exists():
+        return
+
+    parquet_files = sorted(episodes_root.glob("chunk-*/file-*.parquet"))
+    if not parquet_files:
+        return
+
+    dropped_total = 0
+    for p in parquet_files:
+        df = pd.read_parquet(p)
+        drop_cols = [
+            c
+            for c in df.columns
+            if c.endswith("/q01")
+            or c.endswith("/q10")
+            or c.endswith("/q50")
+            or c.endswith("/q90")
+            or c.endswith("/q99")
+        ]
+        if drop_cols:
+            df = df.drop(columns=drop_cols)
+            df.to_parquet(p, index=False)
+            dropped_total += len(drop_cols)
+
+    if dropped_total > 0:
+        print(f"Sanitized episode metadata for online visualizer compatibility (dropped {dropped_total} columns).")
+
+
+def create_lerobot_dataset_v30(
+    episodes,
+    output_dir,
+    repo_id,
+    fps,
+    robot_type,
+    skip_initial_frames=0,
+    action_mode="next_state",
+    task_instruction: str | None = None,
+    sanitize_online_viz_meta=True,
+):
     output_path = Path(output_dir)
     if output_path.exists() and any(output_path.iterdir()):
         raise RuntimeError(f"Output directory '{output_dir}' is not empty.")
 
-    camera_shapes = infer_camera_shapes(episodes)
+    camera_names = infer_common_cameras(episodes)
+    if not camera_names:
+        raise RuntimeError("No common cameras found across episodes with at least one frame.")
+    global_task = resolve_global_task(episodes, task_instruction)
+    print(f"Using one global task instruction for all episodes: {global_task}")
+
+    camera_shapes = infer_camera_shapes(episodes, camera_names)
     image_dim_names = ["height", "width", "channels"]
     
     # Feature schema (same keys and shapes as the v2.1 script; v3.0 layout is handled by LeRobot).
@@ -163,61 +324,23 @@ def create_lerobot_dataset_v30(episodes, output_dir, repo_id, fps, robot_type):
         "observation.state": {
             "dtype": "float32",
             "shape": (14,),
-            "names": [
-                "left_joint1",
-                "left_joint2",
-                "left_joint3",
-                "left_joint4",
-                "left_joint5",
-                "left_joint6",
-                "left_gripper",
-                "right_joint1",
-                "right_joint2",
-                "right_joint3",
-                "right_joint4",
-                "right_joint5",
-                "right_joint6",
-                "right_gripper",
-            ],
+            "names": STATE_DIM_NAMES,
         },
         # Actions (joint-space)
         "action": {
             "dtype": "float32",
             "shape": (14,),
-            "names": [
-                "left_m1",
-                "left_m2",
-                "left_m3",
-                "left_m4",
-                "left_m5",
-                "left_m6",
-                "left_m7",
-                "right_m8",
-                "right_m9",
-                "right_m3",
-                "right_m4",
-                "right_m5",
-                "right_m6",
-                "right_m7",
-            ],
+            # Keep identical ordering and naming to observation.state for 1:1 comparison in visualizers.
+            "names": STATE_DIM_NAMES,
         },
         # Image observations
-        "observation.images.camera_left": {
-            "dtype": "image",
-            "shape": camera_shapes["left"],
-            "names": image_dim_names,
-        },
-        "observation.images.camera_right": {
-            "dtype": "image",
-            "shape": camera_shapes["right"],
-            "names": image_dim_names,
-        },
-        "observation.images.camera_front": {
-            "dtype": "image",
-            "shape": camera_shapes["front"],
-            "names": image_dim_names,
-        },
     }
+    for cam_name in camera_names:
+        features[f"observation.images.camera_{cam_name}"] = {
+            "dtype": "video",
+            "shape": camera_shapes[cam_name],
+            "names": image_dim_names,
+        }
 
     dataset = LeRobotDataset.create(
         repo_id=repo_id,
@@ -230,24 +353,32 @@ def create_lerobot_dataset_v30(episodes, output_dir, repo_id, fps, robot_type):
 
     for ep_idx, ep_data in enumerate(tqdm.tqdm(episodes, desc="Processing Episodes")):
         qpos = ep_data["qpos"]
-        actions = ep_data["actions"]
+        actions = build_actions_from_episode(ep_data, action_mode)
         cam_paths = ep_data["camera_paths"]
+        per_cam_lengths = [len(cam_paths[cam]) for cam in camera_names]
+        usable_len = min(len(qpos), len(actions), *per_cam_lengths)
+        start_idx = max(0, int(skip_initial_frames))
 
-        for f_idx in trange(ep_data["episode_length"], leave=False, desc=f"Frames (ep {ep_idx})"):
-            if f_idx < 5: continue # Skip initial frames as per original script
+        if usable_len <= start_idx:
+            print(
+                f"Skipping episode {ep_idx}: usable_len={usable_len}, "
+                f"skip_initial_frames={start_idx}"
+            )
+            continue
+
+        for f_idx in trange(start_idx, usable_len, leave=False, desc=f"Frames (ep {ep_idx})"):
 
             frame_data = {
                 "observation.state": qpos[f_idx],
                 "action": actions[f_idx],
-                "task": ep_data["task_description"],
+                "task": global_task,
             }
 
             # JUST-IN-TIME IMAGE LOADING
-            for cam_name, paths in cam_paths.items():
-                if f_idx < len(paths):
-                    # Open only this specific frame's image
-                    with Image.open(paths[f_idx]) as img:
-                        frame_data[f"observation.images.camera_{cam_name}"] = img.convert("RGB")
+            for cam_name in camera_names:
+                # Open only this specific frame's image
+                with Image.open(cam_paths[cam_name][f_idx]) as img:
+                    frame_data[f"observation.images.camera_{cam_name}"] = img.convert("RGB")
 
             dataset.add_frame(frame_data)
 
@@ -259,6 +390,8 @@ def create_lerobot_dataset_v30(episodes, output_dir, repo_id, fps, robot_type):
 
     print("Finalizing v3.0 dataset (writing Parquet and MP4 files)...")
     dataset.finalize()
+    if sanitize_online_viz_meta:
+        sanitize_episode_metadata_for_online_viz(output_dir)
     print(f"Success! Dataset saved to {output_dir}")
 
 
@@ -269,10 +402,38 @@ def main():
     parser.add_argument("--repo_id", type=str, default="molmoact_v30")
     parser.add_argument("--fps", type=int, default=10)
     parser.add_argument("--robot_type", type=str, default="molmoact_dual_arm")
+    parser.add_argument("--skip_initial_frames", type=int, default=0)
+    parser.add_argument(
+        "--action_mode",
+        type=str,
+        default="next_joint_fields",
+        choices=["next_joint_fields", "next_state", "copy_state"],
+        help=(
+            "How to derive action. next_joint_fields uses next_left/right_joint from source JSON "
+            "(recommended), next_state uses shifted state[t+1], copy_state uses state[t]."
+        ),
+    )
+    parser.add_argument(
+        "--task_instruction",
+        type=str,
+        default=None,
+        help="Single task instruction to apply to all episodes (recommended).",
+    )
+    parser.add_argument("--sanitize_online_viz_meta", type=int, default=1)
     args = parser.parse_args()
 
     episodes = load_molmoact_data(args.data_dir)
-    create_lerobot_dataset_v30(episodes, args.output_dir, args.repo_id, args.fps, args.robot_type)
+    create_lerobot_dataset_v30(
+        episodes,
+        args.output_dir,
+        args.repo_id,
+        args.fps,
+        args.robot_type,
+        skip_initial_frames=args.skip_initial_frames,
+        action_mode=args.action_mode,
+        task_instruction=args.task_instruction,
+        sanitize_online_viz_meta=bool(args.sanitize_online_viz_meta),
+    )
 
 
 if __name__ == "__main__":
