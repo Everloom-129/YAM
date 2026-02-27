@@ -87,9 +87,9 @@ def main():
     print(f"Found {len(ids)} camera devices")
     print(ids)
     cameras = {
-        "left_camera": RealSenseCamera('218722270092'),
-        "front_camera": RealSenseCamera('336222076815'),
-        "right_camera": RealSenseCamera('218622276072'),
+        "left_camera": RealSenseCamera(camera_cfg["left_camera"]["device_id"]),
+        "front_camera": RealSenseCamera(camera_cfg["front_camera"]["device_id"]),
+        "right_camera": RealSenseCamera(camera_cfg["right_camera"]["device_id"]),
     }
 
     bimanual = args.right_config_path is not None
@@ -113,15 +113,6 @@ def main():
         preprocess, postprocess = make_pre_post_processors(
             policy.config, left_cfg["policy"]["checkpoint_path"], dataset_stats=ds_meta.stats
         )
-
-    # dit policy
-        # model_id = left_cfg["policy"]["checkpoint_path"]
-        # dataset_id = left_cfg["policy"]["repo_id"]
-        # policy = DiffusionPolicy.from_pretrained(model_id)
-        # ds_meta = LeRobotDatasetMetadata(dataset_id)
-        # preprocess, postprocess = make_pre_post_processors(
-        #     policy.config, model_id, dataset_stats=ds_meta.stats
-        # )
 
     # pi05 policy
     elif left_cfg["policy"]["type"] == "pi05":
@@ -318,44 +309,6 @@ def run_control_loop_eval_pi(
         if sleep_time > 0:
             time.sleep(sleep_time)
 
-# def run_control_loop_eval_dit(
-#     env: RobotEnv,
-#     policy: DiffusionPolicy = None,
-#     preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]] = None,
-#     postprocessor: PolicyProcessorPipeline[PolicyAction, PolicyAction] = None,
-#     ds_meta: LeRobotDatasetMetadata = None,
-# ) -> None:
-#     """Run the main control loop.
-
-#     Args:
-#         env: Robot environment
-#         agent: Agent for control
-#         save_interface: Optional save interface for data collection
-#         print_timing: Whether to print timing information
-#         use_colors: Whether to use colored terminal output
-#     """
-#     start_time = time.time()
-#     obs = env.get_obs()
-#     policy.reset()
-#     logger.info("Starting policy inference...")
-
-#     while True:
-#         observation = preprocess_observation(obs)
-#         # observation = {key: observation[key].to(DEVICE, non_blocking=True) for key in observation}
-#         observation = {
-#             key: value.to(DEVICE, non_blocking=True) if torch.is_tensor(value) else value
-#             for key, value in observation.items()
-#         }
-#         log_collect_demos("Running policy inference...", "info")
-#         start_time = time.time()
-#         observation = preprocessor(observation)
-#         actions = policy.select_action(observation)
-#         actions = postprocessor(actions)
-#         actions = actions.squeeze(0).detach().cpu().numpy()
-#         inference_time = time.time() - start_time
-#         log_collect_demos(f"Policy inference completed in {inference_time:.3f}s", "success")
-#         log_collect_demos(f"Generated {len(actions)} action(s)", "data_info")
-#         obs = smooth_move_while_inference_envstep(env, actions, steps=5)
 
 def run_control_loop_eval(
     env: RobotEnv,
@@ -380,10 +333,6 @@ def run_control_loop_eval(
     while True:
         observation = preprocess_observation(obs)
         observation = {key: observation[key].to(DEVICE, non_blocking=True) for key in observation}
-        # observation = {
-        #     key: value.to(DEVICE, non_blocking=True) if torch.is_tensor(value) else value
-        #     for key, value in observation.items()
-        # }
         log_collect_demos("Running policy inference...", "info")
         observation = preprocessor(observation)
         start_time = time.time()

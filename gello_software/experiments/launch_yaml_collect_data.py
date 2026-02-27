@@ -154,9 +154,9 @@ def main():
     print(f"Found {len(ids)} camera devices")
     print(ids)
     cameras = {
-        "left_camera": RealSenseCamera("218722270092"),
-        "front_camera": RealSenseCamera("336222076815"),
-        "right_camera": RealSenseCamera("218622276072"),
+        "left_camera": RealSenseCamera(camera_cfg["left_camera"]["device_id"]),
+        "front_camera": RealSenseCamera(camera_cfg["front_camera"]["device_id"]),
+        "right_camera": RealSenseCamera(camera_cfg["right_camera"]["device_id"]),
     }
 
     bimanual = args.right_config_path is not None

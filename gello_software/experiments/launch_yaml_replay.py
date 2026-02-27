@@ -113,20 +113,6 @@ def main():
 
     args = tyro.cli(Args)
 
-    # left, right front camera (the device id order is based on the plugged in order on the adapter)
-    # from gello.cameras.realsense_camera import get_device_ids
-    # device_ids = get_device_ids()
-    # print(f"Found {len(device_ids)} camera devices")
-    # print(device_ids)
-    # camera_left = RealSenseCamera(flip=False, device_id=device_ids[0])
-    # camera_right = RealSenseCamera(flip=False, device_id=device_ids[1])
-    # camera_front = RealSenseCamera(flip=False, device_id=device_ids[2])
-    # cameras = {
-    #     "left_camera": camera_left,
-    #     "right_camera": camera_right,
-    #     "front_camera": camera_front,
-    # }
-
     bimanual = args.right_config_path is not None
 
     # Load configs

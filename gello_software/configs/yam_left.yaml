@@ -1,3 +1,12 @@
+sensors:
+  cameras:
+    left_camera:
+      device_id: "218622275075"
+    front_camera:
+      device_id: "215222073684"
+    right_camera:
+      device_id: "128422272697"
+
 robot:
   _target_: gello.robots.yam.YAMRobot
   channel: can_left
