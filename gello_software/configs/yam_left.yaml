@@ -36,14 +36,25 @@ storage:
   episodes: 30
   base_dir: "/home/sean/Desktop/YAM/gello_software/data_recurrent"
   task_directory: "test"
-  language_instruction: "stack cube into pyramid"
+  language_instruction: "test"
   teleop_device: "oculus" # ["oculus", "keyboard", "gello", "none"]
   save_format: "json" # ["json", "npy"]
   old_format: false
+
+# LeRobot conversion + upload pipeline
+lerobot:
+  auto_convert_and_upload: true
+  hf_repo_id: "williamtsai726/lerobot_test"
+  delete_local_after_upload: true
+  fps: 30
+  robot_type: "molmoact_dual_arm"
+  skip_initial_frames: 0
+  action_mode: "next_joint_fields" # ["next_joint_fields", "next_state", "copy_state"]
+  sanitize_online_viz_meta: true
 
 # Policy configuration
 policy:
   # _target_: lerobot.policies.pi05.configuration_pi05.PI05Config
   type: "dp"
-  repo_id: "williamtsai726/stop_the_rolling_glue_0206"
-  checkpoint_path: "/home/sean/Desktop/YAM/lerobot/outputs/stop_the_rolling_glue_0206/checkpoints/100000/pretrained_model"
+  repo_id: "williamtsai726/fold_towel_video_0225"
+  checkpoint_path: "/home/sean/Desktop/YAM/lerobot/outputs/test/checkpoints/100000/pretrained_model"

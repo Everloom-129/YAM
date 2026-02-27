@@ -2,6 +2,9 @@ import atexit
 from math import inf
 from multiprocessing import Process
 import signal
+import shutil
+import subprocess
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -138,6 +141,125 @@ def update_offsets(cfg):
     joint_offsets = get_joint_offsets(cfg, cfg["agent"]["port"])
     cfg["agent"]["dynamixel_config"]["joint_offsets"] = joint_offsets
     return cfg
+
+
+def run_post_collection_pipeline(cfg: dict) -> None:
+    """Convert json data to LeRobot, upload to HF, and optionally delete local data."""
+    storage_cfg = cfg.get("storage", {})
+    lerobot_cfg = cfg.get("lerobot", {})
+    if not lerobot_cfg.get(
+        "auto_convert_and_upload", False
+    ):
+        return
+
+    base_dir = Path(storage_cfg["base_dir"]).expanduser()
+    task_directory = storage_cfg["task_directory"]
+    json_data_dir = base_dir / task_directory
+    lerobot_dir = base_dir / f"{task_directory}_lerobot_v30"
+    repo_id = lerobot_cfg.get("hf_repo_id", storage_cfg.get("hf_repo_id"))
+    if not repo_id:
+        raise ValueError(
+            "lerobot.hf_repo_id is required when lerobot.auto_convert_and_upload is true."
+        )
+
+    converter_script = Path(__file__).resolve().parents[2] / "molmoact_to_lerobot_v30.py"
+    add_tag_script = Path(__file__).resolve().parents[2] / "add_tag.py"
+    if not converter_script.exists():
+        raise FileNotFoundError(f"Converter script not found: {converter_script}")
+    if not add_tag_script.exists():
+        raise FileNotFoundError(f"Tag script not found: {add_tag_script}")
+    if not json_data_dir.exists():
+        raise FileNotFoundError(f"Collected json directory not found: {json_data_dir}")
+    if lerobot_dir.exists():
+        remove_dir = input(
+            f"The LeRobot output directory {lerobot_dir} already exists. "
+            "Do you want to remove it and continue? (y/n): "
+        ).strip().lower()
+        if remove_dir == "y":
+            shutil.rmtree(lerobot_dir)
+            lerobot_dir.mkdir(parents=True, exist_ok=True)
+            print(f"Removed and recreated output directory: {lerobot_dir}")
+        elif remove_dir == "n":
+            print("Conversion canceled by user because output directory already exists.")
+            return
+        else:
+            print("Invalid input. Conversion canceled.")
+            return
+
+    convert_cmd = [
+        sys.executable,
+        str(converter_script),
+        "--data_dir",
+        str(json_data_dir),
+        "--output_dir",
+        str(lerobot_dir),
+        "--repo_id",
+        str(repo_id),
+        "--fps",
+        str(lerobot_cfg.get("fps", storage_cfg.get("lerobot_fps", cfg.get("hz", 30)))),
+        "--robot_type",
+        str(
+            lerobot_cfg.get(
+                "robot_type", storage_cfg.get("lerobot_robot_type", "molmoact_dual_arm")
+            )
+        ),
+        "--skip_initial_frames",
+        str(lerobot_cfg.get("skip_initial_frames", storage_cfg.get("lerobot_skip_initial_frames", 0))),
+        "--action_mode",
+        str(
+            lerobot_cfg.get(
+                "action_mode", storage_cfg.get("lerobot_action_mode", "next_joint_fields")
+            )
+        ),
+        "--task_instruction",
+        str(storage_cfg.get("language_instruction", "perform the task")),
+        "--sanitize_online_viz_meta",
+        str(
+            int(
+                bool(
+                    lerobot_cfg.get(
+                        "sanitize_online_viz_meta",
+                        storage_cfg.get("sanitize_online_viz_meta", True),
+                    )
+                )
+            )
+        ),
+    ]
+    print(f"Running conversion: {' '.join(convert_cmd)}")
+    subprocess.run(convert_cmd, check=True)
+
+    upload_cmd = [
+        "hf",
+        "upload",
+        str(repo_id),
+        str(lerobot_dir),
+        "--repo-type=dataset",
+    ]
+    print(f"Uploading to Hugging Face: {' '.join(upload_cmd)}")
+    subprocess.run(upload_cmd, check=True)
+
+    tag_cmd = [
+        sys.executable,
+        str(add_tag_script),
+        "--repo_id",
+        str(repo_id),
+    ]
+    print(f"Creating dataset tag: {' '.join(tag_cmd)}")
+    subprocess.run(tag_cmd, check=True)
+
+    if lerobot_cfg.get(
+        "delete_local_after_upload", storage_cfg.get("delete_local_after_upload", True)
+    ):
+        for path in (json_data_dir, lerobot_dir):
+            if path.exists():
+                print(f"Deleting local directory: {path}")
+                shutil.rmtree(path)
+        print("Local cleanup completed.")
+    else:
+        print("Local cleanup skipped by config.")
+
+    print("Post-collection pipeline completed successfully.")
+    return
 
 def main():
     # Register cleanup handlers
@@ -311,6 +433,9 @@ def main():
     else:
         run_control_loop_prior(env, agent, left_cfg=left_cfg, data_saver=data_saver, kb_interface=kb_interface)
 
+    cleanup()
+    run_post_collection_pipeline(left_cfg)
+    print("All tasks completed. Exiting launcher.")
 
 
 if __name__ == "__main__":

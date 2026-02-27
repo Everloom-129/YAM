@@ -33,24 +33,24 @@ Usage example:
         --data_dir /path/to/molmoact \
         --output_dir /path/to/molmoact_lerobot_v30 \
         --repo_id your-user/molmoact_v30 \
-        --fps 10
+        --fps 30
     
     python molmoact_to_lerobot_v30.py \
-        --data_dir /home/sean/Desktop/YAM/gello_software/data/fold_towel \
-        --output_dir /home/sean/Desktop/YAM/gello_software/data/fold_towel_lerobot_v30 \
-        --repo_id williamtsai726/fold_towel_video_0224 \
-        --fps 10
+        --data_dir /home/sean/Desktop/YAM/gello_software/data_recurrent/test \
+        --output_dir /home/sean/Desktop/YAM/gello_software/data_recurrent/test_lerobot_v30 \
+        --repo_id williamtsai726/test_lerobot_v30 \
+        --fps 30
 
-    hf upload williamtsai726/stop_the_rolling_glue_rlds_0203 ./stop_the_rolling_glue_rlds --repo-type=dataset
+    hf upload williamtsai726/test_lerobot_v30 /home/sean/Desktop/YAM/gello_software/data_recurrent/test_lerobot_v30 --repo-type=dataset
 
 You can then train with:
 
     # diffusion policy
     python src/lerobot/scripts/lerobot_train.py \
-            --dataset.repo_id=williamtsai726/fold_towel_video_0224     \
+            --dataset.repo_id=williamtsai726/lerobot_test     \
             --policy.type=diffusion \
             --policy.repo_id=williamtsai726/fold_towel_0224 \
-            --output_dir=./outputs/test \
+            --output_dir=./outputs/test_lerobot \
             --save_after_step=60000 \
             --steps=100000 \
             

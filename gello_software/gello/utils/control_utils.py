@@ -233,7 +233,8 @@ def run_control_loop_prior(
     saver_thread = EpisodeSaverThread(data_saver)
     saver_thread.start()
     logger = logging.getLogger(__name__)
-    num_traj = 1
+    num_traj = data_saver.traj_count if data_saver is not None else 1
+    logger.info(f"Starting trajectory index at {num_traj}")
 
     start_time = time.time()
     last_save_time = time.time()

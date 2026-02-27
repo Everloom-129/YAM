@@ -14,9 +14,6 @@ class Args:
 hub_api = HfApi()
 
 hub_api.create_tag(args.repo_id, tag="v3.0", repo_type="dataset")
-hub_api.create_tag(args.repo_id, tag="v3.0", repo_type="dataset")
-
-refs = hub_api.list_repo_refs(args.repo_id, repo_type="dataset")
 refs = hub_api.list_repo_refs(args.repo_id, repo_type="dataset")
 
 # tags are under refs.tags
