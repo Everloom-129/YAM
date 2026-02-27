@@ -234,7 +234,6 @@ def run_control_loop_prior(
     saver_thread.start()
     logger = logging.getLogger(__name__)
     num_traj = 1
-    hz = 10
 
     start_time = time.time()
     last_save_time = time.time()
@@ -269,10 +268,8 @@ def run_control_loop_prior(
             else:
                 action = agent.act(obs)
                 next_obs = env.step(action)
-                if time.time() - last_save_time > (1/hz):
-                    obs["next_joint"] = next_obs["joint_positions"]
-                    data_saver.add_observation(obs)
-                    last_save_time = time.time()
+                obs["next_joint"] = next_obs["joint_positions"]
+                data_saver.add_observation(obs)
                 obs = next_obs.copy()
 
         if result == "save":
