@@ -83,7 +83,7 @@ def get_yam_robot(
     current_pos = [m.pos for m in motor_states]
     logging.info(f"current_pos: {current_pos}")
 
-    for idx, motor_state in enumerate(motor_states):
+    for idx, motor_state in enumerate(motor_states[:-1]): # exclude the gripper motor since we don't need to calibrate its offset.
         motor_position = motor_state.pos
         # if not within -pi to pi, set to the nearest equivalent position
         if motor_position < -np.pi:

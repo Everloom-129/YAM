@@ -80,11 +80,6 @@ def main():
     ids = get_device_ids()
     print(f"Found {len(ids)} camera devices")
     print(ids)
-cameras = {
-        "left_camera": RealSenseCamera(camera_cfg["left_camera"]["device_id"]),
-        "front_camera": RealSenseCamera(camera_cfg["front_camera"]["device_id"]),
-        "right_camera": RealSenseCamera(camera_cfg["right_camera"]["device_id"]),
-    }
 
     bimanual = args.right_config_path is not None
 
@@ -92,6 +87,13 @@ cameras = {
     left_cfg = OmegaConf.to_container(
         OmegaConf.load(args.left_config_path), resolve=True
     )
+
+    camera_cfg = left_cfg["sensors"]["cameras"]
+    cameras = {
+        "left_camera": RealSenseCamera(camera_cfg["left_camera"]["device_id"]),
+        "front_camera": RealSenseCamera(camera_cfg["front_camera"]["device_id"]),
+        "right_camera": RealSenseCamera(camera_cfg["right_camera"]["device_id"]),
+    }
 
     if bimanual:
         right_cfg = OmegaConf.to_container(

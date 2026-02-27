@@ -153,11 +153,6 @@ def main():
     ids = get_device_ids()
     print(f"Found {len(ids)} camera devices")
     print(ids)
-    cameras = {
-        "left_camera": RealSenseCamera(camera_cfg["left_camera"]["device_id"]),
-        "front_camera": RealSenseCamera(camera_cfg["front_camera"]["device_id"]),
-        "right_camera": RealSenseCamera(camera_cfg["right_camera"]["device_id"]),
-    }
 
     bimanual = args.right_config_path is not None
 
@@ -175,6 +170,13 @@ def main():
     # Initialize data saver and keyboard interface
     data_saver = DataSaver(save_dir=left_cfg['storage']['base_dir'], task_directory=left_cfg['storage']['task_directory'], language_instruction=left_cfg['storage']['language_instruction'])
     kb_interface = KBReset()
+
+    camera_cfg = left_cfg["sensors"]["cameras"]
+    cameras = {
+        "left_camera": RealSenseCamera(camera_cfg["left_camera"]["device_id"]),
+        "front_camera": RealSenseCamera(camera_cfg["front_camera"]["device_id"]),
+        "right_camera": RealSenseCamera(camera_cfg["right_camera"]["device_id"]),
+    }
 
     # Create agent
     if bimanual:

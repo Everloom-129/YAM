@@ -3,6 +3,7 @@ from typing import Dict
 import numpy as np
 
 from gello.robots.robot import Robot
+from i2rt.robots.utils import GripperType
 
 
 class YAMRobot(Robot):
@@ -11,7 +12,7 @@ class YAMRobot(Robot):
     def __init__(self, channel="can0"):
         from i2rt.robots.get_robot import get_yam_robot
 
-        self.robot = get_yam_robot(channel=channel)
+        self.robot = get_yam_robot(channel=channel, gripper_type=GripperType.LINEAR_4310)
 
         # YAM has 7 joints (6 arm joints + 1 gripper)
         self._joint_names = [
@@ -26,7 +27,7 @@ class YAMRobot(Robot):
         self._joint_state = self.get_joint_state()  # 7 joints
         # self._joint_state = np.zeros(7)  # 7 joints
         self._joint_velocities = np.zeros(7)  # 7 joints
-        self._gripper_state = 0.0
+        self._gripper_state = 1.0
 
     def num_dofs(self) -> int:
         return 7  # YAM has 7 DOFs

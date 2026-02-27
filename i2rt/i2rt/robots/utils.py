@@ -50,8 +50,7 @@ class GripperType(enum.Enum):
         if self == GripperType.CRANK_4310:
             return 0.0, -2.7
         elif self in [GripperType.LINEAR_3507, GripperType.LINEAR_4310]:
-            return [0.0, -5.2]
-            # return None
+            return 0.0, -5.2
         elif self in [GripperType.YAM_TEACHING_HANDLE, GripperType.NO_GRIPPER]:
             return None
 
@@ -59,7 +58,8 @@ class GripperType(enum.Enum):
         if self == GripperType.CRANK_4310:
             return False
         elif self in [GripperType.LINEAR_3507, GripperType.LINEAR_4310]:
-            return True
+            # return True
+            return False
         elif self in [GripperType.YAM_TEACHING_HANDLE, GripperType.NO_GRIPPER]:
             return False
 
