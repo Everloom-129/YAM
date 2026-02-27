@@ -30,46 +30,88 @@ python experiments/launch_yaml.py --left_config_path=configs/yam_left.yaml --rig
 ### Data Collection
 To perform data collection, we need to change the content of the configuration file ```configs/yam_left.yaml```.
 
-Goto ```yam_left.yaml``` and you will see a section called ```storage```:
+Goto ```yam_left.yaml``` and you will see sections called ```storage``` and ```lerobot```:
 ```bash
 # Data storage configuration
 storage:
-  episodes: 50
-  base_dir: "/home/sean/Desktop/YAM/gello_software/data"
-  task_directory: "stack_cubes"
-  language_instruction: "stack cubes"
+  episodes: 30
+  base_dir: "/home/sean/Desktop/YAM/gello_software/data_recurrent"
+  task_directory: "test"
+  language_instruction: "test"
   teleop_device: "oculus" # ["oculus", "keyboard", "gello", "none"]
   save_format: "json" # ["json", "npy"]
   old_format: false
+
+# LeRobot conversion + upload pipeline
+lerobot:
+  auto_convert_and_upload: true
+  hf_repo_id: "your_huggingface_user/your_dataset_name"
+  delete_local_after_upload: true
+  fps: 30
+  robot_type: "molmoact_dual_arm"
+  skip_initial_frames: 0
+  action_mode: "next_joint_fields" # ["next_joint_fields", "next_state", "copy_state"]
+  sanitize_online_viz_meta: true
 ```
-```episode``` is the maximum episode you can collect. The program will be killed when it reaches this number.
+```storage.episodes``` is the maximum episode index to collect. The collection loop ends when this limit is reached.
 
-```base_dir``` is the location to store all the collected data.
+```storage.base_dir``` is the location to store collected raw json episodes.
 
-```task_directory``` is the name of the directory you want to store all the data.
+```storage.task_directory``` is the subdirectory name for that task.
 
-```language_instruction``` is the instruction of the task.
+```storage.language_instruction``` is the instruction written into collected data.
 
-Don't need to change the other parameters. 
+```lerobot.auto_convert_and_upload``` enables post-collection automation:
+1. convert json to LeRobot v3.0
+2. upload to Hugging Face
+3. add dataset tag (`v3.0`) via ```add_tag.py```
+4. optionally delete local json + lerobot data if ```delete_local_after_upload``` is true
 
-To perform data collection after configured the data storage, simply run:
+```lerobot.hf_repo_id``` is the destination Hugging Face dataset repo in the form ```username/dataset_name```.
+
+```lerobot.delete_local_after_upload``` controls whether local raw json and local LeRobot output are deleted after successful upload and tagging.
+
+```lerobot.fps``` is the frame rate metadata written into the generated LeRobot dataset (set this to match your collection/control frequency).
+
+```lerobot.robot_type``` sets the robot metadata field saved in the LeRobot dataset.
+
+```lerobot.skip_initial_frames``` skips the first N frames of each episode during conversion (useful to remove startup transients).
+
+```lerobot.action_mode``` controls how action is derived:
+- ```next_joint_fields``` (recommended): use ```next_left_joint```/```next_right_joint``` from json.
+- ```next_state```: use shifted joint state at t+1 as action.
+- ```copy_state```: use current joint state at t as action.
+
+```lerobot.sanitize_online_viz_meta``` removes quantile-only metadata columns after conversion to improve compatibility with some online visualizers.
+
+To perform data collection after configuration simply run:
 ```bash
 python experiments/launch_yaml_collect_data.py --left_config_path=configs/yam_left.yaml --right_config_path=configs/yam_right.yaml
 ```
 
 The program will launch a color pad to take keyboard input. 
 
-Press ```s``` to start collecting 1 episode of data and the color pad will turn blue.
+Press ```s``` to start collecting 1 episode of data.
 
-Press ```a``` to end and save collected episode and the color pad will turn green.
+Press ```a``` to end and save collected episode.
 
-Press ```b``` to end and delete collected episode and the color pad will turn red.
+Press ```b``` to end and delete collected episode.
 
-Note: make sure you are on the color pad so it can take in the keyboard input. (don't put it in the background). But to kill the program with ```ctrl+c```, you will need to be on cursor.
-If not, the color pad will obsorb the keyboard command and the program will not be killed. 
+After all episodes are collected, the script automatically runs conversion/upload/tagging.
+If the LeRobot output directory already exists, it will ask:
+```bash
+Do you want to remove it and continue? (y/n)
+```
+Type ```y``` to remove and continue, or ```n``` to cancel conversion/upload.
+
+Important: pressing ```ctrl+c``` exits early and only performs robot/socket cleanup.  
+It does **not** run convert/upload/tag pipeline.
+
+Note: make sure you are on the color pad so it can take in the keyboard input (don't put it in the background).  
+To kill the program with ```ctrl+c```, you will need to be on your IDE or Terminal.
 
 ### Data Converstion
-Currently, the data is saved in json format. We would eventually convert them into lerobot v3.0. To do that, we can run the ```molmoact_to_lerobot_v30.py``` script.
+Manual conversion is still available if needed. Data is saved in json format and can be converted with ```molmoact_to_lerobot_v30.py```:
 ```
 python molmoact_to_lerobot_v30.py \
         --data_dir /path/to/molmoact \
@@ -77,46 +119,45 @@ python molmoact_to_lerobot_v30.py \
         --repo_id your_huggingface_user/molmoact_v30 \
         --fps 10
 ```
-After successful conversion, upload it to huggingface.
+After successful conversion, upload to Hugging Face:
 ```
 hf upload huggingface_user/dataset_name /path/to/local_lerobot_v30_dataset --repo-type=dataset
 ```
-For some reason, the version tag needs to be added manually...
+Then add tag:
 ```
 python add_tag.py --repo_id huggingface_user/dataset_name
 ```
 
 ### Model Evaluation
-To perform evaluation, we need to change the content of the configuration file ```configs/yam_left.yaml```.
+Current evaluation supports two policy types in ```experiments/launch_yaml_eval.py```:
+- ```dp``` (DiffusionPolicy)
+- ```pi05``` (PI05Policy)
 
-Goto ```yam_left.yaml``` and you will see a section called ```policy```:
+Set these fields in ```configs/yam_left.yaml``` under ```policy```:
 ```bash
 # Policy configuration
 policy:
-  _target_: lerobot.common.policies.diffusion.configuration_diffusion.DiffusionConfig
-  repo_id: "/home/sean/Desktop/YAM/lerobot_v30/src/lerobot/datasets/yam_fold_towel_dp_dataset_v3_test"
-  checkpoint_path: "hqfang/nov22-yam-fold_towel-ditx-vit-clip-flow_matching"
+  type: "dp"   # ["dp", "pi05"]
+  repo_id: "your_hf_user/your_dataset_or_local_dataset_path"
+  checkpoint_path: "your_model_repo_or_local_checkpoint_path"
 ```
 
-```_target_``` is the path to the model configuration. Don't need to change if evaluating diffusion or dit model.
+```policy.type``` selects which evaluator path is used:
+- ```dp```: runs ```run_control_loop_eval``` with diffusion policy.
+- ```pi05```: runs ```run_control_loop_eval_pi``` with PI05 chunked actions.
 
-```repo_id``` is the absolute path to the dataset used to train the model. You will need to download the dataset from huggingface if it's not in local.
+```policy.repo_id``` is used to load dataset metadata/statistics (HF dataset id or local dataset path).
 
-```checkpoint_path``` is the name of the model directory on huggingface or the absolute path to the model in local directory.
+```policy.checkpoint_path``` is the policy checkpoint source (HF model id or local checkpoint path).
 
-To perform evaluation after configured the policy, simply run:
+For ```pi05```, task text is taken from ```storage.language_instruction```.
+
+After configuring policy, run:
 ```bash
 python experiments/launch_yaml_eval.py --left_config_path=configs/yam_left.yaml --right_config_path=configs/yam_right.yaml
 ```
 
-If you are not evaluating diffusion or dit, you will need to also update ```experiments/launch_yaml_eval.py``` after you updated the ```_target_``` in ```yam_left.yaml```. Find this line that 
-creates the policy and change it to the model you are evaluating:
-```bash
-policy = DiffusionPolicy.from_pretrained(model_id)
-```
-
-Notes: this function ```preprocess_observation``` in ```experiments/launch_yaml_eval.py``` is used to convert the robot observation into model input format. Make sure its output matches the 
-model desired input. Currently, it doesn't passed in the language instruction. You can add it in here if needed. 
+Notes: ```preprocess_observation``` in ```experiments/launch_yaml_eval.py``` converts robot observations to model inputs for the ```dp``` path. Make sure image size/camera mapping matches your model's expected input format.
 ```bash
 # Define the target image size
 TARGET_HEIGHT = 256
