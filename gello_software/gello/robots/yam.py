@@ -27,7 +27,7 @@ class YAMRobot(Robot):
         self._joint_state = self.get_joint_state()  # 7 joints
         # self._joint_state = np.zeros(7)  # 7 joints
         self._joint_velocities = np.zeros(7)  # 7 joints
-        self._gripper_state = 1.0
+        self._gripper_state = 0.0 # didn't use because joint_state includes gripper position
 
     def num_dofs(self) -> int:
         return 7  # YAM has 7 DOFs

@@ -241,6 +241,33 @@ def run_control_loop_prior(
     # implemented in env.py to allow dynamic offset during data collection
     env.set_original_offset(agent.act(env.get_obs()))
 
+    def build_dashboard_data(
+        obs: Dict[str, Any],
+        phase: str,
+        status_text: str,
+        traj_idx: int,
+        total_traj: int,
+        step_idx: int = 0,
+        max_steps: int = 1,
+    ) -> Dict[str, Any]:
+        camera_frames = {
+            key.replace("_rgb", ""): value
+            for key, value in obs.items()
+            if key.endswith("_rgb")
+        }
+        return {
+            "phase": phase,
+            "status_text": status_text,
+            "traj_idx": traj_idx,
+            "total_traj": total_traj,
+            "step_idx": step_idx,
+            "max_steps": max_steps,
+            "obs_count": len(data_saver.buffer),
+            "joint_positions": obs.get("joint_positions"),
+            "joint_velocities": obs.get("joint_velocities"),
+            "cameras": camera_frames,
+        }
+
     while num_traj <= left_cfg['storage']['episodes']:
         obs = env.get_obs()
         data_saver.reset_buffer()
@@ -252,7 +279,16 @@ def run_control_loop_prior(
 
         logger.info(f"Press 's' to start collecting data: ")
         while True:
-            result = kb_interface.update()
+            dashboard_data = build_dashboard_data(
+                obs=obs,
+                phase="waiting_start",
+                status_text="Press S to start collecting",
+                traj_idx=num_traj,
+                total_traj=left_cfg['storage']['episodes'],
+                step_idx=0,
+                max_steps=left_cfg['collection']['max_episode_length'],
+            )
+            result = kb_interface.update(dashboard_data)
             if result == "start":
                 logger.info(f"Successfully pressed 's', starting to collect data")
                 time.sleep(1)
@@ -261,8 +297,22 @@ def run_control_loop_prior(
                 break
         logger.info(f"Press 'a' to save the data, press 'b' to discard the data")
 
-        for _ in tqdm.tqdm(range(left_cfg['collection']['max_episode_length']), desc=f"Collecting data {num_traj}/{left_cfg['storage']['episodes']}"):
-            result = kb_interface.update()
+        result = "normal"
+        max_episode_length = left_cfg['collection']['max_episode_length']
+        for step_idx in tqdm.tqdm(
+            range(max_episode_length),
+            desc=f"Collecting data {num_traj}/{left_cfg['storage']['episodes']}",
+        ):
+            dashboard_data = build_dashboard_data(
+                obs=obs,
+                phase="collecting",
+                status_text="Collecting... Press A to save, B to discard",
+                traj_idx=num_traj,
+                total_traj=left_cfg['storage']['episodes'],
+                step_idx=step_idx + 1,
+                max_steps=max_episode_length,
+            )
+            result = kb_interface.update(dashboard_data)
             if result == "save" or result == "discard":
                 break
             else:
@@ -290,3 +340,4 @@ def run_control_loop_prior(
     saver_thread.stop()
     saver_thread.join()
     logger.info(f"Finished collecting data")
+    return 
