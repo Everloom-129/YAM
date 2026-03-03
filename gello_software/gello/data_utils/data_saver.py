@@ -6,14 +6,20 @@ from re import L
 import shutil
 import time
 from PIL import Image
-import numpy as np
 
 logger = logging.getLogger("data_saver")
 logger.setLevel(logging.INFO)
 
 
 class DataSaver:
-    def __init__(self, save_dir="/home/sean/Desktop/YAM/gello_software/data", task_directory="Testing_dir", language_instruction="Test"):
+    def __init__(
+        self,
+        save_dir="/home/sean/Desktop/YAM/gello_software/data",
+        task_directory="Testing_dir",
+        language_instruction="Test",
+        saver_max_workers=None,
+        png_compress_level=1,
+    ):
         self.save_dir = os.path.join(
             save_dir,
             task_directory
@@ -23,6 +29,13 @@ class DataSaver:
         self.traj_count = 1 # number of actions saved
         self.buffer = [] # buffer for a single action
         self.instruction = language_instruction
+        # Limit workers to avoid CPU spikes from the saver.
+        if saver_max_workers is None:
+            self.max_workers = max(1, min(4, (os.cpu_count() or 1)))
+        else:
+            self.max_workers = max(1, int(saver_max_workers))
+        # Lower PNG compression is much faster (larger files, lower CPU).
+        self.png_compress_level = max(0, min(9, int(png_compress_level)))
 
         if os.path.exists(self.save_dir):
             remove_dir = input(f"The directory {self.save_dir} already exists. Do you want to remove it? (y/n): ")
@@ -61,29 +74,18 @@ class DataSaver:
             logger.warning("Empty buffer, no observations to save.")
 
         logger.info(f"Saving episode {self.traj_count} to {self.save_dir} with {len(buffer)} observations.")
-        
-        def get_buffer_dict(buffer):
-            logger.info(f"Converting buffer to dictionary with {len(buffer)} observations.")
-            buffer_dict = {}
-            if buffer == []:
-                return buffer_dict
-            for key in buffer[0].keys():
-                buffer_dict[key] = np.stack([obs[key] for obs in buffer])
-            return buffer_dict
-        
-        buffer_dict = get_buffer_dict(buffer)
-        if buffer_dict == {}:
+        if buffer == []:
             logger.warning("Empty buffer, no observations to save.")
             return
-        
+
         img_paths = {}
         task_name = self.instruction
-        joints = buffer_dict['joint']
-        next_joints = buffer_dict['next_joint']
+        joints = [obs["joint"] for obs in buffer]
+        next_joints = [obs["next_joint"] for obs in buffer]
 
         if not pickle_only:
             # save rgb from camera
-            rgb_keys = [key for key in buffer_dict.keys() if "rgb" in key]
+            rgb_keys = [key for key in buffer[0].keys() if "rgb" in key]
             rgb_keys.sort()  # Sort from smallest to largest
             # logger.info(f"Found {len(rgb_keys)} RGB cameras: {rgb_keys}")
             
@@ -99,8 +101,9 @@ class DataSaver:
                 paths = []
                 tasks = []
 
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    for i, img in enumerate(buffer_dict[key]):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    for i, obs in enumerate(buffer):
+                        img = obs[key]
                         img_path = os.path.join(save_dir, f'{i:06d}.png')
                         tasks.append(executor.submit(self.save_image, img, img_path))
                         paths.append(img_path)
@@ -147,4 +150,4 @@ class DataSaver:
         self.traj_count += 1
     
     def save_image(self, image, path):
-        Image.fromarray(image).save(path)
+        Image.fromarray(image).save(path, compress_level=self.png_compress_level)

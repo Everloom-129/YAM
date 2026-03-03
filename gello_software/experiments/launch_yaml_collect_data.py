@@ -48,6 +48,15 @@ def cleanup():
         move_to_start_position(_env, _bimanual, _left_cfg, _right_cfg)
     else:
         move_to_start_position(_env, _bimanual, _left_cfg)
+
+    # Stop server loops first so background threads can exit.
+    for server in active_servers:
+        try:
+            if hasattr(server, "stop"):
+                server.stop()
+        except Exception as e:
+            print(f"Error stopping server: {e}")
+
     for server in active_servers:
         try:
             if hasattr(server, "close"):
@@ -57,7 +66,7 @@ def cleanup():
 
     for thread in active_threads:
         if thread.is_alive():
-            thread.join(timeout=2)
+            thread.join(timeout=5)
 
     print("Cleanup completed.")
 
@@ -259,7 +268,6 @@ def run_post_collection_pipeline(cfg: dict) -> None:
         print("Local cleanup skipped by config.")
 
     print("Post-collection pipeline completed successfully.")
-    return
 
 def main():
     # Register cleanup handlers
@@ -290,7 +298,13 @@ def main():
         right_cfg = update_offsets(right_cfg)
 
     # Initialize data saver and keyboard interface
-    data_saver = DataSaver(save_dir=left_cfg['storage']['base_dir'], task_directory=left_cfg['storage']['task_directory'], language_instruction=left_cfg['storage']['language_instruction'])
+    data_saver = DataSaver(
+        save_dir=left_cfg["storage"]["base_dir"],
+        task_directory=left_cfg["storage"]["task_directory"],
+        language_instruction=left_cfg["storage"]["language_instruction"],
+        saver_max_workers=left_cfg["storage"].get("saver_max_workers"),
+        png_compress_level=left_cfg["storage"].get("png_compress_level", 1),
+    )
     kb_interface = KBReset()
 
     camera_cfg = left_cfg["sensors"]["cameras"]
@@ -435,7 +449,7 @@ def main():
 
     cleanup()
     run_post_collection_pipeline(left_cfg)
-    print("All tasks completed. Exiting launcher.")
+    print("All tasks completed.")
 
 
 if __name__ == "__main__":

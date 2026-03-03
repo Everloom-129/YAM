@@ -1,11 +1,11 @@
 sensors:
   cameras:
     left_camera:
-      device_id: "218622275075"
+      device_id: "218722270092"
     front_camera:
-      device_id: "215222073684"
+      device_id: "336222076815"
     right_camera:
-      device_id: "128422272697"
+      device_id: "218622276072"
 
 robot:
   _target_: gello.robots.yam.YAMRobot
@@ -33,18 +33,20 @@ collection:
 
 # Data storage configuration
 storage:
-  episodes: 30
-  base_dir: "/home/sean/Desktop/YAM/gello_software/data_recurrent"
-  task_directory: "test"
-  language_instruction: "test"
+  episodes: 200
+  base_dir: "/media/sean/Samsung980/data"
+  task_directory: "Open_slider_zipper_bag"
+  language_instruction: "Open slider zipper bag"
   teleop_device: "oculus" # ["oculus", "keyboard", "gello", "none"]
   save_format: "json" # ["json", "npy"]
+  saver_max_workers: 2
+  png_compress_level: 1
   old_format: false
 
 # LeRobot conversion + upload pipeline
 lerobot:
   auto_convert_and_upload: true
-  hf_repo_id: "williamtsai726/lerobot_test"
+  hf_repo_id: "hangyufeng/put_snack_into_plate_Mar02_take3"
   delete_local_after_upload: true
   fps: 30
   robot_type: "molmoact_dual_arm"

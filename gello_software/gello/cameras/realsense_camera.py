@@ -127,10 +127,13 @@ import os
 import threading
 import time
 from typing import List, Optional, Tuple
+import logging
 
 import numpy as np
 
 from gello.cameras.camera import CameraDriver
+
+logger = logging.getLogger(__name__)
 
 
 def get_device_ids() -> List[str]:
@@ -156,7 +159,19 @@ class RealSenseCamera(CameraDriver):
         self._device_id = device_id
         self._flip = flip
         self._lock = threading.Lock()
+        self._frame_lock = threading.Lock()
         self._warmup_frames = 15
+        self._read_timeout_ms = 1200
+        self._read_wait_timeout_sec = 1.5
+        self._max_frame_age_sec = 0.30
+        self._max_read_attempts = 5
+        self._latest_color_image = None
+        self._latest_depth_image = None
+        self._latest_frame_timestamp = None
+        self._last_capture_error = None
+        self._frame_ready = threading.Event()
+        self._stop_event = threading.Event()
+        self._capture_thread = None
 
         self._rs = rs
         self._pipeline = None
@@ -164,6 +179,49 @@ class RealSenseCamera(CameraDriver):
         self._align = rs.align(rs.stream.color)
 
         self._start_pipeline()
+        self._start_capture_thread()
+
+    def _start_capture_thread(self):
+        self._capture_thread = threading.Thread(
+            target=self._capture_loop,
+            name=f"realsense_capture_{self._device_id or 'default'}",
+            daemon=True,
+        )
+        self._capture_thread.start()
+
+    def _capture_loop(self):
+        consecutive_failures = 0
+        while not self._stop_event.is_set():
+            try:
+                with self._lock:
+                    frames = self._pipeline.wait_for_frames(timeout_ms=self._read_timeout_ms)
+                    frames = self._align.process(frames)
+                    color_frame = frames.get_color_frame()
+                    depth_frame = frames.get_depth_frame()
+
+                if not color_frame or not depth_frame:
+                    raise RuntimeError("Invalid RealSense frame pair received.")
+
+                color_image = np.asanyarray(color_frame.get_data()).copy()
+                depth_image = np.asanyarray(depth_frame.get_data()).copy()
+                timestamp = time.time()
+
+                with self._frame_lock:
+                    self._latest_color_image = color_image
+                    self._latest_depth_image = depth_image
+                    self._latest_frame_timestamp = timestamp
+                    self._last_capture_error = None
+                    self._frame_ready.set()
+
+                consecutive_failures = 0
+            except Exception as exc:
+                consecutive_failures += 1
+                with self._frame_lock:
+                    self._last_capture_error = exc
+                if consecutive_failures >= self._max_read_attempts:
+                    self._frame_ready.set()
+                time.sleep(0.05)
+                self._start_pipeline()
 
     def _start_pipeline(self):
         rs = self._rs
@@ -205,40 +263,25 @@ class RealSenseCamera(CameraDriver):
         """
         import cv2
 
-        attempts = 0
-        while True:
-            attempts += 1
-            need_restart = False
-            with self._lock:
-                try:
-                    frames = self._pipeline.wait_for_frames(timeout_ms=500)
-                except Exception:
-                    need_restart = True
-                    frames = None
+        if not self._frame_ready.wait(timeout=self._read_wait_timeout_sec):
+            raise RuntimeError("Timed out waiting for RealSense capture thread to produce a frame.")
 
-                if frames is not None:
-                    frames = self._align.process(frames)
+        with self._frame_lock:
+            color_image = self._latest_color_image
+            depth_image = self._latest_depth_image
+            frame_timestamp = self._latest_frame_timestamp
+            last_error = self._last_capture_error
 
-                    color_frame = frames.get_color_frame()
-                    depth_frame = frames.get_depth_frame()
+        if color_image is None or depth_image is None or frame_timestamp is None:
+            if last_error is not None:
+                raise RuntimeError("RealSense capture thread failed to produce a frame.") from last_error
+            raise RuntimeError("RealSense frame is unavailable.")
 
-                    if not color_frame or not depth_frame:
-                        need_restart = True
-                    else:
-                        color_image = np.asanyarray(color_frame.get_data()).copy()
-                        depth_image = np.asanyarray(depth_frame.get_data()).copy()
-
-                if not need_restart and frames is not None:
-                    break
-
-            if need_restart:
-                time.sleep(0.05)
-                self._start_pipeline()
-                if attempts >= 5:
-                    raise RuntimeError(
-                        "Failed to read frames from RealSense camera after restarting pipeline."
-                    )
-                continue
+        frame_age = time.time() - frame_timestamp
+        if frame_age > self._max_frame_age_sec:
+            raise RuntimeError(
+                f"RealSense frame is stale ({frame_age:.3f}s old); camera may be stalled."
+            )
 
         if img_size is None:
             image = cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB)
