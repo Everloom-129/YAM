@@ -28,9 +28,7 @@ python experiments/launch_yaml.py --left_config_path=configs/yam_left.yaml --rig
 ```
 
 ### Data Collection
-To perform data collection, we need to change the content of the configuration file ```configs/yam_left.yaml```.
-
-Goto ```yam_left.yaml``` and you will see sections called ```storage``` and ```lerobot```:
+To perform data collection, update ```configs/yam_left.yaml```, mainly sections ```storage``` and ```lerobot```:
 ```bash
 # Data storage configuration
 storage:
@@ -44,7 +42,8 @@ storage:
 
 # LeRobot conversion + upload pipeline
 lerobot:
-  auto_convert_and_upload: true
+  auto_convert: true
+  auto_upload: true
   hf_repo_id: "your_huggingface_user/your_dataset_name"
   delete_local_after_upload: true
   fps: 30
@@ -61,15 +60,14 @@ lerobot:
 
 ```storage.language_instruction``` is the instruction written into collected data.
 
-```lerobot.auto_convert_and_upload``` enables post-collection automation:
-1. convert json to LeRobot v3.0
-2. upload to Hugging Face
-3. add dataset tag (`v3.0`) via ```add_tag.py```
-4. optionally delete local json + lerobot data if ```delete_local_after_upload``` is true
+```lerobot.auto_convert``` controls whether post-collection conversion is run.
+
+```lerobot.auto_upload``` controls whether converted data is uploaded to Hugging Face after conversion.
+If upload is enabled, the script also tries to create dataset tag ```v3.0``` and skips tag creation if it already exists.
 
 ```lerobot.hf_repo_id``` is the destination Hugging Face dataset repo in the form ```username/dataset_name```.
 
-```lerobot.delete_local_after_upload``` controls whether local raw json and local LeRobot output are deleted after successful upload and tagging.
+```lerobot.delete_local_after_upload``` controls whether local raw json and local LeRobot output are deleted after successful upload/tagging.
 
 ```lerobot.fps``` is the frame rate metadata written into the generated LeRobot dataset (set this to match your collection/control frequency).
 
@@ -97,36 +95,65 @@ Press ```a``` to end and save collected episode.
 
 Press ```b``` to end and delete collected episode.
 
-After all episodes are collected, the script automatically runs conversion/upload/tagging.
+After all episodes are collected, the script runs post-collection pipeline based on config:
+- if ```auto_convert: true``` and ```auto_upload: false```, it converts only.
+- if ```auto_convert: true``` and ```auto_upload: true```, it converts, uploads, and tags.
+
 If the LeRobot output directory already exists, it will ask:
 ```bash
 Do you want to remove it and continue? (y/n)
 ```
-Type ```y``` to remove and continue, or ```n``` to cancel conversion/upload.
+Type ```y``` to remove and continue, or ```n``` to cancel the post-collection pipeline.
 
 Important: pressing ```ctrl+c``` exits early and only performs robot/socket cleanup.  
-It does **not** run convert/upload/tag pipeline.
+It does **not** run the convert/upload/tag pipeline.
 
 Note: make sure you are on the color pad so it can take in the keyboard input (don't put it in the background).  
 To kill the program with ```ctrl+c```, you will need to be on your IDE or Terminal.
 
 ### Data Converstion
-Manual conversion is still available if needed. Data is saved in json format and can be converted with ```molmoact_to_lerobot_v30.py```:
+Manual conversion is still available if needed. Data is saved in json format and can be converted with ```molmoact_to_lerobot_v30.py```.
+
+By default, the script loads parameters from ```gello_software/configs/yam_left.yaml```:
+- ```data_dir = storage.base_dir + storage.task_directory```
+- ```output_dir = storage.base_dir + storage.task_directory + "_lerobot_v30"```
+- upload behavior from ```lerobot.auto_upload```
+
+Field definitions used by conversion/upload in ```gello_software/configs/yam_left.yaml```:
+
+```storage``` fields:
+- ```base_dir```: root directory where collected json episodes are stored.
+- ```task_directory```: task subfolder under ```base_dir``` (also used to derive output directory name).
+- ```language_instruction```: default task text written into converted LeRobot episodes.
+
+```lerobot``` fields:
+- ```auto_convert```: enables post-collection conversion in the launcher pipeline.
+- ```auto_upload```: if true, converted data is uploaded to Hugging Face.
+- ```hf_repo_id```: target Hugging Face dataset repo (format: ```username/dataset_name```).
+- ```delete_local_after_upload```: if true, remove local json + local LeRobot folder after successful upload/tag.
+- ```fps```: frame rate metadata saved into the LeRobot dataset.
+- ```robot_type```: robot metadata string saved into the LeRobot dataset.
+- ```skip_initial_frames```: number of initial frames to skip per episode during conversion.
+- ```action_mode```: how action is derived (```next_joint_fields```, ```next_state```, ```copy_state```).
+- ```sanitize_online_viz_meta```: removes quantile-only metadata columns for better online visualizer compatibility.
+
+So if your config is already set, you can run:
+```bash
+python molmoact_to_lerobot_v30.py
 ```
+
+You can still override parameters manually:
+```bash
 python molmoact_to_lerobot_v30.py \
         --data_dir /path/to/molmoact \
         --output_dir /path/to/molmoact_lerobot_v30 \
         --repo_id your_huggingface_user/molmoact_v30 \
-        --fps 10
+        --fps 10 \
+        --upload_to_hf 1
 ```
-After successful conversion, upload to Hugging Face:
-```
-hf upload huggingface_user/dataset_name /path/to/local_lerobot_v30_dataset --repo-type=dataset
-```
-Then add tag:
-```
-python add_tag.py --repo_id huggingface_user/dataset_name
-```
+
+When upload is enabled, the script uploads to Hugging Face and then adds tag ```v3.0``` automatically.  
+If the tag already exists, it skips creating the duplicate tag.
 
 ### Model Evaluation
 Current evaluation supports two policy types in ```experiments/launch_yaml_eval.py```:
