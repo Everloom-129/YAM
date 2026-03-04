@@ -153,12 +153,18 @@ def update_offsets(cfg):
 
 
 def run_post_collection_pipeline(cfg: dict) -> None:
-    """Convert json data to LeRobot, upload to HF, and optionally delete local data."""
+    """Run optional post-collection conversion/upload/tag pipeline."""
     storage_cfg = cfg.get("storage", {})
     lerobot_cfg = cfg.get("lerobot", {})
-    if not lerobot_cfg.get(
-        "auto_convert_and_upload", False
-    ):
+    auto_convert = bool(lerobot_cfg.get("auto_convert", False))
+    auto_upload = bool(lerobot_cfg.get("auto_upload", False))
+    if not auto_convert and not auto_upload:
+        return
+    if auto_upload and not auto_convert:
+        print(
+            "Skipping post-collection upload because lerobot.auto_convert is false. "
+            "Enable lerobot.auto_convert to run conversion+upload pipeline."
+        )
         return
 
     base_dir = Path(storage_cfg["base_dir"]).expanduser()
@@ -166,17 +172,14 @@ def run_post_collection_pipeline(cfg: dict) -> None:
     json_data_dir = base_dir / task_directory
     lerobot_dir = base_dir / f"{task_directory}_lerobot_v30"
     repo_id = lerobot_cfg.get("hf_repo_id", storage_cfg.get("hf_repo_id"))
-    if not repo_id:
+    if auto_upload and not repo_id:
         raise ValueError(
-            "lerobot.hf_repo_id is required when lerobot.auto_convert_and_upload is true."
+            "lerobot.hf_repo_id is required when lerobot.auto_upload is true."
         )
 
     converter_script = Path(__file__).resolve().parents[2] / "molmoact_to_lerobot_v30.py"
-    add_tag_script = Path(__file__).resolve().parents[2] / "add_tag.py"
     if not converter_script.exists():
         raise FileNotFoundError(f"Converter script not found: {converter_script}")
-    if not add_tag_script.exists():
-        raise FileNotFoundError(f"Tag script not found: {add_tag_script}")
     if not json_data_dir.exists():
         raise FileNotFoundError(f"Collected json directory not found: {json_data_dir}")
     if lerobot_dir.exists():
@@ -203,7 +206,7 @@ def run_post_collection_pipeline(cfg: dict) -> None:
         "--output_dir",
         str(lerobot_dir),
         "--repo_id",
-        str(repo_id),
+        str(repo_id or "molmoact_v30"),
         "--fps",
         str(lerobot_cfg.get("fps", storage_cfg.get("lerobot_fps", cfg.get("hz", 30)))),
         "--robot_type",
@@ -233,39 +236,22 @@ def run_post_collection_pipeline(cfg: dict) -> None:
                 )
             )
         ),
+        "--upload_to_hf",
+        str(int(auto_upload)),
+        "--delete_local_after_upload",
+        str(
+            int(
+                bool(
+                    lerobot_cfg.get(
+                        "delete_local_after_upload",
+                        storage_cfg.get("delete_local_after_upload", True),
+                    )
+                )
+            )
+        ),
     ]
-    print(f"Running conversion: {' '.join(convert_cmd)}")
+    print(f"Running post-collection pipeline: {' '.join(convert_cmd)}")
     subprocess.run(convert_cmd, check=True)
-
-    upload_cmd = [
-        "hf",
-        "upload",
-        str(repo_id),
-        str(lerobot_dir),
-        "--repo-type=dataset",
-    ]
-    print(f"Uploading to Hugging Face: {' '.join(upload_cmd)}")
-    subprocess.run(upload_cmd, check=True)
-
-    tag_cmd = [
-        sys.executable,
-        str(add_tag_script),
-        "--repo_id",
-        str(repo_id),
-    ]
-    print(f"Creating dataset tag: {' '.join(tag_cmd)}")
-    subprocess.run(tag_cmd, check=True)
-
-    if lerobot_cfg.get(
-        "delete_local_after_upload", storage_cfg.get("delete_local_after_upload", True)
-    ):
-        for path in (json_data_dir, lerobot_dir):
-            if path.exists():
-                print(f"Deleting local directory: {path}")
-                shutil.rmtree(path)
-        print("Local cleanup completed.")
-    else:
-        print("Local cleanup skipped by config.")
 
     print("Post-collection pipeline completed successfully.")
 

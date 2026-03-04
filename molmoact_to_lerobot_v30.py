@@ -68,8 +68,9 @@ Fixed to avoid OOM by using Lazy Loading of images.
 
 import argparse
 import json
-import os
 import gc
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -77,6 +78,7 @@ import numpy as np
 from PIL import Image
 import tqdm
 from tqdm import trange
+from omegaconf import OmegaConf
 
 # LeRobot v3.0 API
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -395,14 +397,122 @@ def create_lerobot_dataset_v30(
     print(f"Success! Dataset saved to {output_dir}")
 
 
+def upload_dataset_to_hf(repo_id: str, output_dir: str) -> None:
+    """Upload local LeRobot dataset directory to the HF dataset repo."""
+    upload_cmd = [
+        "hf",
+        "upload",
+        str(repo_id),
+        str(output_dir),
+        "--repo-type=dataset",
+    ]
+    print(f"Uploading dataset to Hugging Face: {' '.join(upload_cmd)}")
+    subprocess.run(upload_cmd, check=True)
+
+
+def add_v30_tag(repo_id: str) -> None:
+    """Create v3.0 dataset tag in HF repo if missing."""
+    from huggingface_hub import HfApi
+
+    hub_api = HfApi()
+    refs = hub_api.list_repo_refs(repo_id, repo_type="dataset")
+    existing_tags = {tag.name for tag in refs.tags}
+    if "v3.0" in existing_tags:
+        print("Tag v3.0 already exists. Skipping tag creation.")
+        print(f"Repo tags: {sorted(existing_tags)}")
+        return
+
+    hub_api.create_tag(repo_id, tag="v3.0", repo_type="dataset")
+    refs = hub_api.list_repo_refs(repo_id, repo_type="dataset")
+    print(f"Repo tags: {[tag.name for tag in refs.tags]}")
+
+
+def cleanup_local_dirs(data_dir: str, output_dir: str) -> None:
+    """Delete local source and converted dataset directories."""
+    for path in (Path(data_dir), Path(output_dir)):
+        if path.exists():
+            print(f"Deleting local directory: {path}")
+            shutil.rmtree(path)
+    print("Local cleanup completed.")
+
+
+def load_defaults_from_yaml(config_path: str) -> Dict[str, Any]:
+    """Load converter defaults from launch config yaml."""
+    defaults: Dict[str, Any] = {
+        "data_dir": None,
+        "output_dir": None,
+        "repo_id": "molmoact_v30",
+        "fps": 10,
+        "robot_type": "molmoact_dual_arm",
+        "skip_initial_frames": 0,
+        "action_mode": "next_joint_fields",
+        "task_instruction": None,
+        "sanitize_online_viz_meta": 1,
+        "upload_to_hf": 0,
+        "delete_local_after_upload": 0,
+    }
+
+    cfg_path = Path(config_path).expanduser()
+    if not cfg_path.exists():
+        return defaults
+
+    cfg = OmegaConf.to_container(OmegaConf.load(cfg_path), resolve=True)
+    if not isinstance(cfg, dict):
+        return defaults
+
+    storage = cfg.get("storage", {}) or {}
+    lerobot = cfg.get("lerobot", {}) or {}
+
+    base_dir = storage.get("base_dir")
+    task_directory = storage.get("task_directory")
+    if base_dir and task_directory:
+        base_dir_path = Path(base_dir).expanduser()
+        defaults["data_dir"] = str(base_dir_path / str(task_directory))
+        defaults["output_dir"] = str(base_dir_path / f"{task_directory}_lerobot_v30")
+
+    repo_id = lerobot.get("hf_repo_id", storage.get("hf_repo_id"))
+    if repo_id:
+        defaults["repo_id"] = str(repo_id)
+
+    defaults["fps"] = int(lerobot.get("fps", storage.get("lerobot_fps", cfg.get("hz", 10))))
+    defaults["robot_type"] = str(
+        lerobot.get("robot_type", storage.get("lerobot_robot_type", "molmoact_dual_arm"))
+    )
+    defaults["skip_initial_frames"] = int(
+        lerobot.get("skip_initial_frames", storage.get("lerobot_skip_initial_frames", 0))
+    )
+    defaults["action_mode"] = str(
+        lerobot.get("action_mode", storage.get("lerobot_action_mode", "next_joint_fields"))
+    )
+    defaults["task_instruction"] = storage.get("language_instruction")
+    defaults["sanitize_online_viz_meta"] = int(
+        bool(lerobot.get("sanitize_online_viz_meta", storage.get("sanitize_online_viz_meta", True)))
+    )
+    defaults["upload_to_hf"] = int(bool(lerobot.get("auto_upload", False)))
+    defaults["delete_local_after_upload"] = int(
+        bool(lerobot.get("delete_local_after_upload", storage.get("delete_local_after_upload", False)))
+    )
+    return defaults
+
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", type=str, required=True)
-    parser.add_argument("--output_dir", type=str, required=True)
-    parser.add_argument("--repo_id", type=str, default="molmoact_v30")
-    parser.add_argument("--fps", type=int, default=10)
-    parser.add_argument("--robot_type", type=str, default="molmoact_dual_arm")
-    parser.add_argument("--skip_initial_frames", type=int, default=0)
+    bootstrap_parser = argparse.ArgumentParser(add_help=False)
+    bootstrap_parser.add_argument(
+        "--config_path",
+        type=str,
+        default="../gello_software/configs/yam_left.yaml",
+        help="Path to launch yaml used for default converter settings.",
+    )
+    bootstrap_args, _ = bootstrap_parser.parse_known_args()
+    config_defaults = load_defaults_from_yaml(bootstrap_args.config_path)
+
+    parser = argparse.ArgumentParser(parents=[bootstrap_parser])
+    parser.add_argument("--data_dir", type=str, default=config_defaults["data_dir"])
+    parser.add_argument("--output_dir", type=str, default=config_defaults["output_dir"])
+    parser.add_argument("--repo_id", type=str, default=config_defaults["repo_id"])
+    parser.add_argument("--fps", type=int, default=config_defaults["fps"])
+    parser.add_argument("--robot_type", type=str, default=config_defaults["robot_type"])
+    parser.add_argument("--skip_initial_frames", type=int, default=config_defaults["skip_initial_frames"])
     parser.add_argument(
         "--action_mode",
         type=str,
@@ -416,11 +526,33 @@ def main():
     parser.add_argument(
         "--task_instruction",
         type=str,
-        default=None,
+        default=config_defaults["task_instruction"],
         help="Single task instruction to apply to all episodes (recommended).",
     )
-    parser.add_argument("--sanitize_online_viz_meta", type=int, default=1)
+    parser.add_argument(
+        "--sanitize_online_viz_meta",
+        type=int,
+        default=config_defaults["sanitize_online_viz_meta"],
+    )
+    parser.add_argument(
+        "--upload_to_hf",
+        type=int,
+        default=config_defaults["upload_to_hf"],
+        help="Set to 1 to upload converted dataset to Hugging Face.",
+    )
+    parser.add_argument(
+        "--delete_local_after_upload",
+        type=int,
+        default=config_defaults["delete_local_after_upload"],
+        help="Set to 1 to delete local source and converted data after successful upload.",
+    )
     args = parser.parse_args()
+
+    if not args.data_dir or not args.output_dir:
+        raise ValueError(
+            "data_dir/output_dir are not set. Provide them directly or ensure "
+            "storage.base_dir and storage.task_directory are set in --config_path."
+        )
 
     episodes = load_molmoact_data(args.data_dir)
     create_lerobot_dataset_v30(
@@ -434,6 +566,12 @@ def main():
         task_instruction=args.task_instruction,
         sanitize_online_viz_meta=bool(args.sanitize_online_viz_meta),
     )
+
+    if bool(args.upload_to_hf):
+        upload_dataset_to_hf(args.repo_id, args.output_dir)
+        add_v30_tag(args.repo_id)
+        if bool(args.delete_local_after_upload):
+            cleanup_local_dirs(args.data_dir, args.output_dir)
 
 
 if __name__ == "__main__":

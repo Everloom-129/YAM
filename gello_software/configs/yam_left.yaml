@@ -35,8 +35,10 @@ collection:
 storage:
   episodes: 200
   base_dir: "/media/sean/Samsung980/data"
-  task_directory: "Open_slider_zipper_bag"
-  language_instruction: "Open slider zipper bag"
+  task_directory: "open_slider_zipper_bag"
+  language_instruction: "Open the slider of zipper bag"
+  # task_directory: "remove_carafe_from_coffee_maker_and_open_lid"
+  # language_instruction: "Remove carafe from coffee maker and open lid"
   teleop_device: "oculus" # ["oculus", "keyboard", "gello", "none"]
   save_format: "json" # ["json", "npy"]
   saver_max_workers: 2
@@ -45,8 +47,10 @@ storage:
 
 # LeRobot conversion + upload pipeline
 lerobot:
-  auto_convert_and_upload: true
-  hf_repo_id: "hangyufeng/put_snack_into_plate_Mar02_take3"
+  auto_convert: true
+  auto_upload: true
+  hf_repo_id: "hangyufeng/open_slider_zipper_bag_mar03"
+  # hf_repo_id: "hangyufeng/remove_carafe_from_coffee_maker_mar03"
   delete_local_after_upload: true
   fps: 30
   robot_type: "molmoact_dual_arm"
