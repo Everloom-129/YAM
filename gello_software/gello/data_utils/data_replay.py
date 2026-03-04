@@ -258,6 +258,7 @@ class DataReplayer():
 
                 max_delta = (np.abs(curr_joints - target_joints)).max()
                 steps = min(int(max_delta / 0.01), 100)
+                print(f"Moving to start position with {steps} steps")
 
                 # print(f"Moving robot to target joints position: {target_joints}")
                 for jnt in np.linspace(curr_joints, target_joints, steps):

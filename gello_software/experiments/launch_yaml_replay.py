@@ -124,16 +124,6 @@ def main():
             OmegaConf.load(args.right_config_path), resolve=True
         )
 
-    if bimanual:
-        from gello.agents.agent import BimanualAgent
-
-        agent = BimanualAgent(
-            agent_left=instantiate_from_dict(left_cfg["agent"]),
-            agent_right=instantiate_from_dict(right_cfg["agent"]),
-        )
-    else:
-        agent = instantiate_from_dict(left_cfg["agent"])
-
     # Create robot(s)
     left_robot_cfg = left_cfg["robot"]
     if isinstance(left_robot_cfg.get("config"), str):
@@ -232,7 +222,7 @@ def main():
         move_to_start_position(env, bimanual, left_cfg)
 
     print(
-        f"Launching robot: {robot.__class__.__name__}, agent: {agent.__class__.__name__}"
+        f"Launching robot: {robot.__class__.__name__}"
     )
 
     logger.info("Start replay...")
