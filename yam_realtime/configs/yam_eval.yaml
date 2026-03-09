@@ -5,20 +5,20 @@ sensors:
     left_camera:
         _target_: yam_realtime.sensors.cameras.camera.CameraNode
         camera:
-            _target_: yam_realtime.sensors.cameras.opencv_camera.OpencvCamera
-            device_path: "/dev/video3"
+            _target_: yam_realtime.sensors.cameras.realsense_camera.RealSenseCamera
+            device_id: "218722270092"
             camera_type: "realsense_camera"
     right_camera:
         _target_: yam_realtime.sensors.cameras.camera.CameraNode
         camera:
-            _target_: yam_realtime.sensors.cameras.opencv_camera.OpencvCamera
-            device_path: "/dev/video9"
+            _target_: yam_realtime.sensors.cameras.realsense_camera.RealSenseCamera
+            device_id: "218622276072"
             camera_type: "realsense_camera"
     front_camera:
         _target_: yam_realtime.sensors.cameras.camera.CameraNode
         camera:
-            _target_: yam_realtime.sensors.cameras.opencv_camera.OpencvCamera
-            device_path: "/dev/video17"
+            _target_: yam_realtime.sensors.cameras.realsense_camera.RealSenseCamera
+            device_id: "336222076815"
             camera_type: "realsense_camera"
 
 robots:
