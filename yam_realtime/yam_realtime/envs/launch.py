@@ -10,6 +10,7 @@ from typing import Dict, Optional, Tuple, Union
 import sys
 sys.path.append('/home/sean/Desktop/YAM')
 sys.path.append('/home/sean/Desktop/YAM/yam_realtime')
+import numpy as np
 
 import tyro
 
@@ -44,6 +45,16 @@ class LaunchConfig:
 class Args:
     config_path: Tuple[str, ...] = ("~/yam_realtime/configs/yam_viser_bimanual.yaml",)
 
+def reset_robot(agent: Agent, env: RobotEnv, side: str):
+    current_pos = env.robot(side).get_joint_pos()
+    target_joint_positions = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
+
+    steps = 50
+    for i in range(steps + 1):
+        alpha = i / steps  # Interpolation factor
+        target_pos = (1 - alpha) * current_pos + alpha * target_joint_positions  # Linear interpolation
+        env.robot(side).command_joint_pos(target_pos)
+        time.sleep(2 / steps)
 
 def main(args: Args) -> None:
     """
@@ -91,9 +102,20 @@ def main(args: Args) -> None:
             control_rate_hz=rate,
         )
 
+        reset_robot(agent, env, "left")
+        reset_robot(agent, env, "right")
+
         logger.info("Starting control loop...")
         _run_control_loop(env, agent, main_config)
 
+    except KeyboardInterrupt:
+        logger.info("KeyboardInterrupt received, resetting robots before shutdown...")
+        if "env" in locals() and "agent" in locals():
+            try:
+                reset_robot(agent, env, "left")
+                reset_robot(agent, env, "right")
+            except Exception as reset_error:
+                logger.warning(f"Failed to reset robots during shutdown: {reset_error}")
     except Exception as e:
         logger.error(f"Error during execution: {e}")
         raise e
