@@ -191,7 +191,7 @@ def smooth_move_while_inference_envstep(env: RobotEnv, action):
     current_joint = env.get_obs()["joint_positions"]
     target_joint = action
 
-    steps = 20
+    steps = 5
     obs = None
     for i in range(steps + 1):
         alpha = i / steps  # Interpolation factor

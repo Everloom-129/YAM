@@ -68,16 +68,16 @@ class MolmoAct(PolicyBase):
             self.logger.info(f"Number of joints: {len(state)}")
 
             start_time = time.time()
-            actions = self.send_request(images, lang, state, self.url)
+            response = self.send_request(images, lang, state, self.url)
             request_time = time.time() - start_time
 
             self.logger.info(f"Server request completed in {request_time:.3f}s")
-            self.logger.info(f"Raw actions received: {len(actions)} actions")
+            self.logger.info(f"Raw actions received: {len(response['actions'])} actions")
 
             # processed_actions = self.prepare_output(actions)
             # self.logger.info(f"Processed {len(processed_actions)} actions")
 
-            return actions
+            return response
 
         except Exception as e:
             self.logger.error(f"Error during inference: {e}")

@@ -187,7 +187,7 @@ def run_control_loop_eval_open_loop(
         log_collect_demos(f"Policy inference completed in {inference_time:.3f}s", "success")
         log_collect_demos(f"Generated {len(actions)} action(s)", "data_info")
         actions = actions.squeeze(0).detach().cpu().numpy()
-        obs = smooth_move_while_inference_envstep(env, actions)
+        obs = dynamic_smoothing(env, actions)
         obs_index += 1
     logger.info("Finished policy inference")
 
@@ -203,6 +203,26 @@ def smooth_move_while_inference_envstep(env: RobotEnv, action):
         obs = env.step(interpolated_joint)
         time.sleep(0.5 / steps)
 
+    return obs
+
+def dynamic_smoothing(
+                env,
+                target_joints: np.ndarray,
+            ):
+    curr_joints = env.get_obs()["joint_positions"]
+
+    max_delta = (np.abs(curr_joints - target_joints)).max()
+    steps = min(int(max_delta / 0.01), 100)
+    if steps <= 1:
+        obs = env.step(target_joints)
+        return obs
+    print(f"Moving to start position with {steps} steps")
+
+    # print(f"Moving robot to target joints position: {target_joints}")
+    obs = None
+    for jnt in np.linspace(curr_joints, target_joints, steps):
+        obs = env.step(jnt)
+        time.sleep(0.001)
     return obs
 
 def preprocess_observation(observations: dict[str, np.ndarray]) -> dict[str, torch.Tensor]:
