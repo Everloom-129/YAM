@@ -34,20 +34,62 @@ _env = None
 _bimanual = False
 _left_cfg = None
 _right_cfg = None
+_agent = None
+_robot = None
+_robot_client = None
+_cameras = None
+_data_saver = None
+_kb_interface = None
+
+
+def _call_cleanup_methods(resource, resource_name: str, methods: list[str]) -> None:
+    """Best-effort cleanup helper for heterogeneous resources."""
+    if resource is None:
+        return
+    for method_name in methods:
+        if hasattr(resource, method_name):
+            try:
+                getattr(resource, method_name)()
+            except Exception as e:
+                print(f"Error calling {resource_name}.{method_name}(): {e}")
+            return
+
+
+def _close_realsense_camera(camera, camera_name: str) -> None:
+    """Stop RealSense capture thread/pipeline if camera has no public close()."""
+    if camera is None:
+        return
+    if hasattr(camera, "close"):
+        _call_cleanup_methods(camera, camera_name, ["close"])
+        return
+    try:
+        if hasattr(camera, "_stop_event"):
+            camera._stop_event.set()
+        if hasattr(camera, "_capture_thread") and camera._capture_thread is not None:
+            camera._capture_thread.join(timeout=2)
+        if hasattr(camera, "_pipeline") and camera._pipeline is not None:
+            camera._pipeline.stop()
+    except Exception as e:
+        print(f"Error closing camera {camera_name}: {e}")
 
 
 def cleanup():
     """Clean up resources before exit."""
     global cleanup_in_progress
+    global _env, _agent, _robot, _robot_client, _cameras, _data_saver, _kb_interface
     if cleanup_in_progress:
         return
     cleanup_in_progress = True
 
     print("Cleaning up resources...")
-    if _bimanual:
-        move_to_start_position(_env, _bimanual, _left_cfg, _right_cfg)
-    else:
-        move_to_start_position(_env, _bimanual, _left_cfg)
+    try:
+        if _env is not None and _left_cfg is not None:
+            if _bimanual:
+                move_to_start_position(_env, _bimanual, _left_cfg, _right_cfg)
+            else:
+                move_to_start_position(_env, _bimanual, _left_cfg)
+    except Exception as e:
+        print(f"Warning: failed to move robot to start position during cleanup: {e}")
 
     # Stop server loops first so background threads can exit.
     for server in active_servers:
@@ -67,6 +109,35 @@ def cleanup():
     for thread in active_threads:
         if thread.is_alive():
             thread.join(timeout=5)
+
+    _call_cleanup_methods(_robot_client, "robot_client", ["close", "stop", "shutdown"])
+    _call_cleanup_methods(_robot, "robot", ["close", "stop", "shutdown"])
+    _call_cleanup_methods(_agent, "agent", ["close", "stop", "shutdown"])
+    _call_cleanup_methods(_env, "env", ["close", "stop", "shutdown"])
+    _call_cleanup_methods(_data_saver, "data_saver", ["close", "stop", "shutdown"])
+
+    if isinstance(_cameras, dict):
+        for camera_name, camera in _cameras.items():
+            _close_realsense_camera(camera, camera_name)
+
+    if _kb_interface is not None:
+        _call_cleanup_methods(_kb_interface, "kb_interface", ["close", "stop", "shutdown"])
+        try:
+            import pygame
+
+            pygame.quit()
+        except Exception as e:
+            print(f"Error quitting pygame: {e}")
+
+    active_servers.clear()
+    active_threads.clear()
+    _robot_client = None
+    _robot = None
+    _agent = None
+    _env = None
+    _cameras = None
+    _data_saver = None
+    _kb_interface = None
 
     print("Cleanup completed.")
 
@@ -236,6 +307,14 @@ def run_post_collection_pipeline(cfg: dict) -> None:
                 )
             )
         ),
+        "--vcodec",
+        str(lerobot_cfg.get("vcodec", "h264")),
+        "--image_writer_processes",
+        str(int(lerobot_cfg.get("image_writer_processes", 8))),
+        "--image_writer_threads",
+        str(int(lerobot_cfg.get("image_writer_threads", 8))),
+        "--parallel_encoding",
+        str(int(bool(lerobot_cfg.get("parallel_encoding", True)))),
         "--upload_to_hf",
         str(int(auto_upload)),
         "--delete_local_after_upload",
@@ -393,12 +472,18 @@ def main():
     env = RobotEnv(robot_client, control_rate_hz=cfg.get("hz", 30), camera_dict=cameras)
 
     # Store global variables for cleanup
-    # Store global variables for cleanup
     global _env, _bimanual, _left_cfg, _right_cfg
+    global _agent, _robot, _robot_client, _cameras, _data_saver, _kb_interface
     _env = env
     _bimanual = bimanual
     _left_cfg = left_cfg
     _right_cfg = right_cfg if bimanual else None
+    _agent = agent
+    _robot = robot
+    _robot_client = robot_client
+    _cameras = cameras
+    _data_saver = data_saver
+    _kb_interface = kb_interface
 
     # Move robot to start_joints position if specified in config
     from gello.utils.launch_utils import move_to_start_position

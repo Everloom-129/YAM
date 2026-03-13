@@ -35,13 +35,13 @@ Usage example:
         --repo_id your-user/molmoact_v30 \
         --fps 30
     
-    python molmoact_to_lerobot_v30.py \
-        --data_dir /home/sean/Desktop/YAM/gello_software/data_recurrent/test \
-        --output_dir /home/sean/Desktop/YAM/gello_software/data_recurrent/test_lerobot_v30 \
-        --repo_id williamtsai726/test_lerobot_v30 \
+    python ../molmoact_to_lerobot_v30.py \
+        --data_dir /media/sean/Samsung980/reopen_the_drawer \
+        --output_dir /media/sean/Samsung980/reopen_the_drawer_lerobot_v30 \
+        --repo_id williamtsai726/reopen_the_drawer_0312 \
         --fps 30
 
-    hf upload williamtsai726/test_lerobot_v30 /home/sean/Desktop/YAM/gello_software/data_recurrent/test_lerobot_v30 --repo-type=dataset
+    hf upload williamtsai726/stack_four_0310 /media/sean/Samsung980/data/stack_four_lerobot_v30 --repo-type=dataset
 
 You can then train with:
 
@@ -53,6 +53,15 @@ You can then train with:
             --output_dir=./outputs/test_lerobot \
             --save_after_step=60000 \
             --steps=100000 \
+    
+        python src/lerobot/scripts/lerobot_train.py \
+            --dataset.repo_id=williamtsai726/fold_towel_video_0302     \
+            --policy.type=diffusion \
+            --policy.repo_id=williamtsai726/fold_towel_dp_30k_0303 \
+            --output_dir=./outputs/test_dp \
+            --save_freq=10000 \
+            --save_after_step=60000 \
+            --steps=30000
             
             --resume=true \
             --config_path=/home/sean/Desktop/YAM/lerobot/outputs/stack_cube_into_pyramid_0203/checkpoints/100000/pretrained_model/train_config.json
@@ -306,6 +315,10 @@ def create_lerobot_dataset_v30(
     action_mode="next_state",
     task_instruction: str | None = None,
     sanitize_online_viz_meta=True,
+    vcodec="libsvtav1",
+    image_writer_processes=0,
+    image_writer_threads=0,
+    parallel_encoding=True,
 ):
     output_path = Path(output_dir)
     if output_path.exists() and any(output_path.iterdir()):
@@ -350,7 +363,11 @@ def create_lerobot_dataset_v30(
         root=output_dir,
         robot_type=robot_type,
         features=features,
-        use_videos=True, 
+        use_videos=True,
+        image_writer_processes=image_writer_processes,
+        image_writer_threads=image_writer_threads,
+        batch_encoding_size=1,
+        vcodec=vcodec,
     )
 
     for ep_idx, ep_data in enumerate(tqdm.tqdm(episodes, desc="Processing Episodes")):
@@ -385,7 +402,7 @@ def create_lerobot_dataset_v30(
             dataset.add_frame(frame_data)
 
         # Finalize the episode on disk and clear temp buffers
-        dataset.save_episode()
+        dataset.save_episode(parallel_encoding=bool(parallel_encoding))
         
         # Explicitly trigger garbage collection after each episode
         gc.collect()
@@ -448,6 +465,10 @@ def load_defaults_from_yaml(config_path: str) -> Dict[str, Any]:
         "action_mode": "next_joint_fields",
         "task_instruction": None,
         "sanitize_online_viz_meta": 1,
+        "vcodec": "h264",
+        "image_writer_processes": 8,
+        "image_writer_threads": 8,
+        "parallel_encoding": 1,
         "upload_to_hf": 0,
         "delete_local_after_upload": 0,
     }
@@ -488,6 +509,10 @@ def load_defaults_from_yaml(config_path: str) -> Dict[str, Any]:
     defaults["sanitize_online_viz_meta"] = int(
         bool(lerobot.get("sanitize_online_viz_meta", storage.get("sanitize_online_viz_meta", True)))
     )
+    defaults["vcodec"] = str(lerobot.get("vcodec", "h264"))
+    defaults["image_writer_processes"] = int(lerobot.get("image_writer_processes", 8))
+    defaults["image_writer_threads"] = int(lerobot.get("image_writer_threads", 8))
+    defaults["parallel_encoding"] = int(bool(lerobot.get("parallel_encoding", True)))
     defaults["upload_to_hf"] = int(bool(lerobot.get("auto_upload", False)))
     defaults["delete_local_after_upload"] = int(
         bool(lerobot.get("delete_local_after_upload", storage.get("delete_local_after_upload", False)))
@@ -535,6 +560,31 @@ def main():
         default=config_defaults["sanitize_online_viz_meta"],
     )
     parser.add_argument(
+        "--vcodec",
+        type=str,
+        default=config_defaults["vcodec"],
+        choices=["h264", "hevc", "libsvtav1"],
+        help="Video codec for encoding. Use h264 for faster conversion.",
+    )
+    parser.add_argument(
+        "--image_writer_processes",
+        type=int,
+        default=config_defaults["image_writer_processes"],
+        help="Number of image writer processes used by LeRobotDataset.",
+    )
+    parser.add_argument(
+        "--image_writer_threads",
+        type=int,
+        default=config_defaults["image_writer_threads"],
+        help="Number of image writer threads used by LeRobotDataset.",
+    )
+    parser.add_argument(
+        "--parallel_encoding",
+        type=int,
+        default=config_defaults["parallel_encoding"],
+        help="Set to 1 to parallelize multi-camera encoding in save_episode.",
+    )
+    parser.add_argument(
         "--upload_to_hf",
         type=int,
         default=config_defaults["upload_to_hf"],
@@ -565,6 +615,10 @@ def main():
         action_mode=args.action_mode,
         task_instruction=args.task_instruction,
         sanitize_online_viz_meta=bool(args.sanitize_online_viz_meta),
+        vcodec=args.vcodec,
+        image_writer_processes=max(0, int(args.image_writer_processes)),
+        image_writer_threads=max(0, int(args.image_writer_threads)),
+        parallel_encoding=bool(args.parallel_encoding),
     )
 
     if bool(args.upload_to_hf):
