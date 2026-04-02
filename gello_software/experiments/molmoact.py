@@ -10,9 +10,9 @@ from gello.utils.logging_utils import get_molmoact_logger
 class MolmoAct(PolicyBase):
     def __init__(self):
         self.logger = get_molmoact_logger()
-        self.url = "https://2980-71-41-244-70.ngrok-free.app/act"
+        self.url = "https://d29e-71-41-244-70.ngrok-free.app/act"
         self.multi_views = True
-        self.action_horizon = 8
+        self.action_horizon = 25
 
         # Log configuration
         self.logger.info(f"MolmoAct initialized with URL: {self.url}")

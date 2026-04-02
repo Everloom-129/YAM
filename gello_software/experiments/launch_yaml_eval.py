@@ -108,25 +108,60 @@ def main():
 
     # Initialize policy
     if left_cfg["policy"]["type"] == "dp":
-        ds_meta = LeRobotDatasetMetadata(
-            repo_id=left_cfg["policy"]["repo_id"]
-        )
-        policy = DiffusionPolicy.from_pretrained(left_cfg["policy"]["checkpoint_path"], dataset_stats=ds_meta.stats)
-        preprocess, postprocess = make_pre_post_processors(
-            policy.config, left_cfg["policy"]["checkpoint_path"], dataset_stats=ds_meta.stats
-        )
+        model_id = left_cfg["policy"]["checkpoint_path"]
+        dataset_id = left_cfg["policy"].get("repo_id")
+        try:
+            logger.info("Loading DP policy/processors from checkpoint_path only.")
+            policy = DiffusionPolicy.from_pretrained(model_id, dataset_stats=None)
+            preprocess, postprocess = make_pre_post_processors(
+                policy.config, model_id, dataset_stats=None
+            )
+        except Exception as checkpoint_err:
+            if not dataset_id:
+                raise
+            logger.warning(
+                "Checkpoint-only processor load failed, falling back to policy.repo_id=%s. Error: %s",
+                dataset_id,
+                checkpoint_err,
+            )
+            dataset_stats = LeRobotDatasetMetadata(repo_id=dataset_id).stats
+            policy = DiffusionPolicy.from_pretrained(model_id, dataset_stats=dataset_stats)
+            preprocess, postprocess = make_pre_post_processors(
+                policy.config, model_id, dataset_stats=dataset_stats
+            )
 
     # pi05 policy
     elif left_cfg["policy"]["type"] == "pi05":
         model_id = left_cfg["policy"]["checkpoint_path"]
-        dataset_id = left_cfg["policy"]["repo_id"]
-        ds_meta = LeRobotDatasetMetadata(dataset_id)
-        policy = PI05Policy.from_pretrained(model_id)
-        policy.dataset_stats = ds_meta.stats
-        preprocess, postprocess = make_pre_post_processors(
-            policy.config, model_id, 
-            dataset_stats=ds_meta.stats
-        )
+        dataset_id = left_cfg["policy"].get("repo_id")
+        try:
+            logger.info("Loading PI05 policy/processors from checkpoint_path only.")
+            policy = PI05Policy.from_pretrained(model_id)
+            preprocess, postprocess = make_pre_post_processors(
+                policy.config, model_id, dataset_stats=None
+            )
+        except Exception as checkpoint_err:
+            # Surface a clear action item for the common "repo not found/private" case.
+            if "config.json not found on the HuggingFace Hub" in str(checkpoint_err):
+                raise FileNotFoundError(
+                    f"Unable to load PI05 model from '{model_id}'. "
+                    "Verify the Hugging Face repo id exists and is accessible, "
+                    "or authenticate via `huggingface-cli login` if the repo is private/gated."
+                ) from checkpoint_err
+            if not dataset_id:
+                raise
+            logger.warning(
+                "Checkpoint-only processor load failed, falling back to policy.repo_id=%s. Error: %s",
+                dataset_id,
+                checkpoint_err,
+            )
+            dataset_stats = LeRobotDatasetMetadata(dataset_id).stats
+            policy = PI05Policy.from_pretrained(model_id)
+            policy.dataset_stats = dataset_stats
+            preprocess, postprocess = make_pre_post_processors(
+                policy.config, model_id,
+                dataset_stats=dataset_stats
+            )
 
     # Create robot(s)
     left_robot_cfg = left_cfg["robot"]

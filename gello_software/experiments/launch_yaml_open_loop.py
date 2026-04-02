@@ -92,11 +92,22 @@ def main():
             OmegaConf.load(args.right_config_path), resolve=True
         )
 
-    # Initialize policy
-    ds_meta = LeRobotDatasetMetadata(
-        repo_id=left_cfg["policy"]["repo_id"]
-    )
-    policy = DiffusionPolicy.from_pretrained(left_cfg["policy"]["checkpoint_path"], dataset_stats=ds_meta.stats)
+    # Initialize policy (checkpoint_path first, fallback to repo_id stats if needed)
+    model_id = left_cfg["policy"]["checkpoint_path"]
+    dataset_id = left_cfg["policy"].get("repo_id")
+    try:
+        logger.info("Loading DP policy from checkpoint_path only.")
+        policy = DiffusionPolicy.from_pretrained(model_id, dataset_stats=None)
+    except Exception as checkpoint_err:
+        if not dataset_id:
+            raise
+        logger.warning(
+            "Checkpoint-only load failed, falling back to policy.repo_id=%s. Error: %s",
+            dataset_id,
+            checkpoint_err,
+        )
+        ds_meta = LeRobotDatasetMetadata(repo_id=dataset_id)
+        policy = DiffusionPolicy.from_pretrained(model_id, dataset_stats=ds_meta.stats)
     policy.to('cuda')
     policy.eval()
 

@@ -33,10 +33,10 @@ collection:
 
 # Data storage configuration
 storage:
-  episodes: 200
+  episodes: 100
   base_dir: "/media/sean/Samsung980"
-  task_directory: "reopen_the_drawer"
-  language_instruction: "Reopen the drawer"
+  task_directory: "put_on_the_cap"
+  language_instruction: "Sort the candy"
   teleop_device: "oculus" # ["oculus", "keyboard", "gello", "none"]
   save_format: "json" # ["json", "npy"]
   saver_max_workers: 2
@@ -47,7 +47,7 @@ storage:
 lerobot:
   auto_convert: true
   auto_upload: true
-  hf_repo_id: "williamtsai726/reopen_the_drawer_0312"
+  hf_repo_id: "williamtsai726/put_on_the_cap_0329"
   delete_local_after_upload: true
   fps: 30
   robot_type: "molmoact_dual_arm"
@@ -63,5 +63,5 @@ lerobot:
 policy:
   # _target_: lerobot.policies.pi05.configuration_pi05.PI05Config
   type: "pi05"
-  repo_id: "williamtsai726/stack_four_0310"
-  checkpoint_path: "Jiafei1224/pi-05-cube4"
+  # repo_id: "williamtsai726/add_milk_to_the_coffee_0326"
+  checkpoint_path: "Jiafei1224/pi-snack"
