@@ -183,7 +183,7 @@ policy:
 
 ```policy.checkpoint_path``` is the policy checkpoint source (HF model id or local checkpoint path).
 
-For ```pi05```, task text is taken from ```storage.language_instruction```.
+For ```pi05```, task instruction is taken from ```storage.language_instruction```.
 
 After configuring policy, run:
 ```bash
@@ -200,4 +200,14 @@ TARGET_WIDTH = 342
 camera_mapping = {"left_camera_rgb": 'left', "right_camera_rgb": 'right', "front_camera_rgb": 'front'}
 ```
 
+### Model Evaluation for MolmoAct2
+Current evaluation supports remote inference only. The MolmoAct2 model should be hosted in a remote server. 
+
+Update the server url in ```experiments/molmoact.py```
+Update the task instruction ```storage.language_instruction``` in ```configs/yam_left.yaml```.
+
+After configuring policy, run:
+```bash
+python experiments/launch_yaml_eval_molmoact.py --left_config_path=configs/yam_left.yaml --right_config_path=configs/yam_right.yaml
+```
 
