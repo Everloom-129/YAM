@@ -204,6 +204,7 @@ camera_mapping = {"left_camera_rgb": 'left', "right_camera_rgb": 'right', "front
 Current evaluation supports remote inference only. The MolmoAct2 model should be hosted in a remote server. 
 
 Update the server url in ```experiments/molmoact.py```
+
 Update the task instruction ```storage.language_instruction``` in ```configs/yam_left.yaml```.
 
 After configuring policy, run:
