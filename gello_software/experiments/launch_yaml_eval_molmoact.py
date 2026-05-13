@@ -181,23 +181,8 @@ def run_control_loop_eval(
         log_collect_demos(f"Policy inference completed in {inference_time:.3f}s", "success")
         log_collect_demos(f"Generated {len(actions)} action(s)", "data_info")
         for i in range(len(actions)):
-            # obs = smooth_move_while_inference_envstep(env, np.array(actions[i]))
             obs = dynamic_smoothing(env, np.array(actions[i]))
 
-def smooth_move_while_inference_envstep(env: RobotEnv, action):
-    current_joint = env.get_obs()["joint_positions"]
-    target_joint = action
-
-    steps = 5
-    obs = None
-    for i in range(steps + 1):
-        alpha = i / steps  # Interpolation factor
-        interpolated_joint = (1 - alpha) * current_joint + alpha * target_joint  # Linear interpolation
-        obs = env.step(interpolated_joint)
-        time.sleep(0.5 / steps)
-
-    return obs
-    
 def dynamic_smoothing(
                 env,
                 target_joints: np.ndarray,

@@ -244,16 +244,16 @@ def run_control_loop_eval_pi(
         task: Language instruction for the task
     """
     from collections import deque
-    
+
     # Action queue configuration (matching PI05 async inference)
     actions_per_chunk = 50  # PI05 outputs 30 actions per inference
     chunk_size_threshold = 0.0  # Request new inference when queue is empty
     action_queue = deque()  # Queue to store future actions
     current_timestep = 0
-    
+
     # Control frequency configuration
     control_dt = 1.0 / 30.0  # 30Hz control loop
-    
+
     policy.reset()
     logger.info("Starting policy inference with action chunking...")
     log_collect_demos(f"Action chunking: {actions_per_chunk} actions/chunk, threshold: {chunk_size_threshold}", "info")
@@ -262,7 +262,7 @@ def run_control_loop_eval_pi(
     obs = env.get_obs()
     while True:
         cycle_start = time.time()
-        
+
         # Step 1: Execute one action from queue (if available) - do this FIRST like PI05
         if len(action_queue) > 0:
             action = action_queue.popleft()
@@ -271,29 +271,29 @@ def run_control_loop_eval_pi(
         else:
             if current_timestep > 0:  # Only warn after first inference
                 log_collect_demos("WARNING: Action queue empty, waiting for inference...", "warning")
-        
+
         # Step 2: Get current observation (after executing action, to get latest state)
         obs = env.get_obs()
-        
+
         # Step 3: Check if we need new inference (queue below threshold)
         queue_size = len(action_queue)
         need_inference = queue_size <= int(chunk_size_threshold * actions_per_chunk)
-        
+
         if need_inference:
             log_collect_demos(f"Queue size: {queue_size}/{actions_per_chunk}, requesting new inference...", "info")
-            
+
             # Prepare observation following lerobot_pi05 official format
             observation = {}
-            
+
             # Process images: resize → tensor → /255 → permute → unsqueeze → GPU
             TARGET_HEIGHT = 360
             TARGET_WIDTH = 640
             camera_mapping = {
                 "left_camera_rgb": 'camera_left',
-                "right_camera_rgb": 'camera_right',  
+                "right_camera_rgb": 'camera_right',
                 "front_camera_rgb": 'camera_front'
             }
-            
+
             for cam_name, cam_key in camera_mapping.items():
                 if cam_name in obs:
                     img_np = obs[cam_name]
@@ -301,28 +301,28 @@ def run_control_loop_eval_pi(
                     img_pil = Image.fromarray(img_np)
                     img_resized_pil = img_pil.resize((TARGET_WIDTH, TARGET_HEIGHT))
                     img_resized_np = np.array(img_resized_pil)
-                    
+
                     # Convert to tensor, normalize, permute, add batch dim, move to GPU
                     img_tensor = torch.from_numpy(img_resized_np).float() / 255.0
                     img_tensor = img_tensor.permute(2, 0, 1).unsqueeze(0).to(DEVICE)
                     observation[f"observation.images.{cam_key}"] = img_tensor
-            
+
             # Process state: tensor → unsqueeze → GPU
             state = obs["joint_positions"]
             state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(DEVICE)
             observation["observation.state"] = state_tensor
-            
+
             # Add task to observation for PI05
             if task is not None:
                 observation["task"] = [task]
-            
+
             # Preprocess and run inference
             observation = preprocessor(observation)
             inference_start = time.time()
             actions_chunk = policy.predict_action_chunk(observation)  # Returns [1, 50, 14] (full chunk)
             inference_time = time.time() - inference_start
             actions_chunk = actions_chunk[:, :actions_per_chunk, :]  # Take only first 30 actions
-            
+
             # Apply postprocessor to each action in the chunk (postprocessor expects (B, action_dim))
             _, chunk_size, _ = actions_chunk.shape
             processed_actions = []
@@ -330,16 +330,16 @@ def run_control_loop_eval_pi(
                 single_action = actions_chunk[:, i, :]  # (B, action_dim)
                 processed_action = postprocessor(single_action)  # Denormalize
                 processed_actions.append(processed_action)
-            
+
             # Stack back and convert to numpy
             actions_chunk = torch.stack(processed_actions, dim=1).squeeze(0).detach().cpu().numpy()  # [30, 14]
-            
+
             log_collect_demos(f"Policy inference completed in {inference_time:.3f}s, generated {len(actions_chunk)} actions", "success")
-            
+
             # Add all actions to queue
             for action in actions_chunk:
                 action_queue.append(action)
-        
+
         # Step 4: Maintain control frequency (like PI05's dynamic sleep)
         cycle_duration = time.time() - cycle_start
         sleep_time = max(0, control_dt - cycle_duration)
@@ -381,19 +381,6 @@ def run_control_loop_eval(
         actions = actions.squeeze(0).detach().cpu().numpy()
         obs = dynamic_smoothing(env, actions)
 
-def smooth_move_while_inference_envstep(env: RobotEnv, action, steps=5):
-    current_joint = env.get_obs()["joint_positions"]
-    target_joint = action
-
-    obs = None
-    for i in range(steps + 1):
-        alpha = i / steps  # Interpolation factor
-        interpolated_joint = (1 - alpha) * current_joint + alpha * target_joint  # Linear interpolation
-        obs = env.step(interpolated_joint)
-        time.sleep(0.5 / steps)
-
-    return obs
-
 def dynamic_smoothing(
                 env,
                 target_joints: np.ndarray,
@@ -416,7 +403,7 @@ def dynamic_smoothing(
 
 def preprocess_observation(observations: dict[str, np.ndarray]) -> dict[str, torch.Tensor]:
     return_observations = {}
-    
+
     # Define the target size
     TARGET_HEIGHT = 360
     TARGET_WIDTH = 640
@@ -426,17 +413,17 @@ def preprocess_observation(observations: dict[str, np.ndarray]) -> dict[str, tor
     for cam_name, cam_idx in camera_mapping.items():
         if cam_name in observations:
             img_np = observations[cam_name]
-            
+
             # 1. Convert NumPy array to PIL Image
             img_pil = Image.fromarray(img_np)
-            
+
             # 2. Resize the image
             # The order in PIL.Image.resize is (width, height)
             img_resized_pil = img_pil.resize((TARGET_WIDTH, TARGET_HEIGHT))
-            
+
             # 3. Convert resized PIL Image back to NumPy array
             img_resized_np = np.array(img_resized_pil)
-            
+
             # 4. Convert to Tensor, permute, add batch dim, and normalize
             img_tensor = torch.from_numpy(img_resized_np).float().permute(2, 0, 1).cuda().unsqueeze(0)
             return_observations[f"observation.images.camera_{cam_idx}"] = img_tensor
@@ -445,9 +432,6 @@ def preprocess_observation(observations: dict[str, np.ndarray]) -> dict[str, tor
     state = observations["joint_positions"]
     state_tensor = torch.from_numpy(state).float().cuda().unsqueeze(0)  # 1,N
     return_observations["observation.state"] = state_tensor
-
-    # for dit only
-    # return_observations["task"] = "wipe the dish"
 
     return return_observations
 
