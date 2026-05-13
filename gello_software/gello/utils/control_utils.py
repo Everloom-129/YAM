@@ -139,6 +139,7 @@ class SaveInterface:
         return None
 
 
+# teleop
 def run_control_loop(
     env: RobotEnv,
     agent: Agent,
@@ -195,6 +196,7 @@ def run_control_loop(
 
         obs = env.step(action)
 
+# data collection
 def run_control_loop_prior(
     env: RobotEnv,
     agent: Agent,
@@ -337,8 +339,8 @@ def run_control_loop_prior(
             move_to_start_position(env, agent, left_cfg=left_cfg, right_cfg=right_cfg)
         else:
             move_to_start_position(env, agent, left_cfg=left_cfg)
-    
+
     saver_thread.stop()
     saver_thread.join()
     logger.info(f"Finished collecting data")
-    return 
+    return

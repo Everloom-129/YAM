@@ -25,7 +25,6 @@ class DataSaver:
             task_directory
         )
 
-        # self.task = task
         self.traj_count = 1 # number of actions saved
         self.buffer = [] # buffer for a single action
         self.instruction = language_instruction
@@ -53,12 +52,12 @@ class DataSaver:
                 raise FileExistsError(f"The directory {self.save_dir} already exists.")
 
         os.makedirs(self.save_dir, exist_ok=True)
-    
+
     def reset_buffer(self):
         old_size = len(self.buffer)
         self.buffer = []
         logger.info(f"Reset buffer: {old_size} observations cleared.")
-        
+
     def add_observation(self, obs):
         obs_copy = {}
         obs_copy['instruction'] = self.instruction
@@ -88,13 +87,13 @@ class DataSaver:
             rgb_keys = [key for key in buffer[0].keys() if "rgb" in key]
             rgb_keys.sort()  # Sort from smallest to largest
             # logger.info(f"Found {len(rgb_keys)} RGB cameras: {rgb_keys}")
-            
+
             for key in rgb_keys:
                 save_dir = os.path.join(self.save_dir, f'{self.traj_count:06d}')
                 os.makedirs(save_dir, exist_ok=True)
-                
+
                 save_dir = os.path.join(save_dir, key)
-                
+
                 os.makedirs(save_dir, exist_ok=True)
                 # logger.info(f"Created directory for camera {key}: {save_dir}")
 
@@ -128,7 +127,7 @@ class DataSaver:
                 # add image paths to json
                 for j, rgb_key in enumerate(rgb_keys):
                     json_data_obs[f"image_{rgb_key}"] = img_paths[rgb_key][i]
-                
+
                 json_data.append(json_data_obs)
 
             json_save_path = os.path.join(self.save_dir, f'{self.traj_count:06d}', f'{self.traj_count:06d}.json')
@@ -148,6 +147,6 @@ class DataSaver:
         # Just to let user know that the episode is saved
         logger.info(f"Complete!!!! Saved episode {self.traj_count} to {self.save_dir} with {len(buffer)} observations.")
         self.traj_count += 1
-    
+
     def save_image(self, image, path):
         Image.fromarray(image).save(path, compress_level=self.png_compress_level)

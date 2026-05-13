@@ -24,8 +24,8 @@ class YAMRobot(Robot):
             "joint6",
             "gripper",
         ]
-        self._joint_state = self.get_joint_state()  # 7 joints
-        # self._joint_state = np.zeros(7)  # 7 joints
+        self._joint_state = self.get_joint_state()  # robot stays where it was when reboot
+        # self._joint_state = np.zeros(7)  # robot goes immediately to reset position (avoid using)
         self._joint_velocities = np.zeros(7)  # 7 joints
         self._gripper_state = 0.0 # didn't use because joint_state includes gripper position
 
