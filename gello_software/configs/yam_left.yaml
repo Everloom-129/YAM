@@ -67,3 +67,8 @@ policy:
   repo_id: "williamtsai726/add_milk_to_the_coffee_0326"
   # checkpoint_path: "Jiafei1224/pi-snack"
   checkpoint_path: "lerobot/pi05_base"
+
+# Eval session configuration (used by launch_yaml_eval_molmoact.py)
+eval:
+  live_view_enabled: true        # show the 3-pane cv2 window during rollouts
+  # max_steps and lerobot.* are reused from the existing top-level blocks above.
