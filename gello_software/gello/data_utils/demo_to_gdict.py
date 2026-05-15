@@ -20,35 +20,6 @@ from simple_bc.utils.visualization_utils import make_grid_video_from_numpy
 
 from gello.data_utils.conversion_utils import preproc_obs
 
-# def get_act_bounds(source_dir: str) -> np.ndarray:
-#     pkls = natsorted(
-#         glob.glob(os.path.join(source_dir, "**/*.pkl"), recursive=True), reverse=True
-#     )
-#     if len(pkls) <= 30:
-#         print(f"Skipping {source_dir} because it has less than 30 frames.")
-#         return None
-#     pkls = pkls[:-5]
-#
-#     scale_factor = None
-#     for pkl in pkls:
-#         try:
-#             with open(pkl, "rb") as f:
-#                 demo = pickle.load(f)
-#         except Exception as e:
-#             print(f"Skipping {pkl} because it is corrupted.")
-#             print(f"Error: {e}")
-#             raise Exception("Corrupted pkl")
-#
-#         requested_control = demo.pop("control")
-#         curr_scale_factor = np.abs(requested_control)
-#         if scale_factor is None:
-#             scale_factor = curr_scale_factor
-#         else:
-#             scale_factor = np.maximum(scale_factor, curr_scale_factor)
-#     assert scale_factor is not None
-#     return scale_factor
-
-
 def get_act_min_max(source_dir: str) -> Tuple[np.ndarray, np.ndarray]:
     pkls = natsorted(
         glob.glob(os.path.join(source_dir, "**/*.pkl"), recursive=True), reverse=True

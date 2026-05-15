@@ -34,14 +34,6 @@ Usage example:
         --output_dir /path/to/molmoact_lerobot_v30 \
         --repo_id your-user/molmoact_v30 \
         --fps 30
-    
-    python ../molmoact_to_lerobot_v30.py \
-        --data_dir /media/sean/Samsung980/reopen_the_drawer \
-        --output_dir /media/sean/Samsung980/reopen_the_drawer_lerobot_v30 \
-        --repo_id williamtsai726/reopen_the_drawer_0312 \
-        --fps 30
-
-    hf upload williamtsai726/stack_four_0310 /media/sean/Samsung980/data/stack_four_lerobot_v30 --repo-type=dataset
 
 You can then train with:
 
@@ -53,18 +45,6 @@ You can then train with:
             --output_dir=./outputs/test_lerobot \
             --save_after_step=60000 \
             --steps=100000 \
-    
-        python src/lerobot/scripts/lerobot_train.py \
-            --dataset.repo_id=williamtsai726/fold_towel_video_0302     \
-            --policy.type=diffusion \
-            --policy.repo_id=williamtsai726/fold_towel_dp_30k_0303 \
-            --output_dir=./outputs/test_dp \
-            --save_freq=10000 \
-            --save_after_step=60000 \
-            --steps=30000
-            
-            --resume=true \
-            --config_path=/home/sean/Desktop/YAM/lerobot/outputs/stack_cube_into_pyramid_0203/checkpoints/100000/pretrained_model/train_config.json
 
 Note: For local training, `--dataset.repo_id` can be the absolute path to the dataset directory.
 """
@@ -332,7 +312,7 @@ def create_lerobot_dataset_v30(
 
     camera_shapes = infer_camera_shapes(episodes, camera_names)
     image_dim_names = ["height", "width", "channels"]
-    
+
     # Feature schema (same keys and shapes as the v2.1 script; v3.0 layout is handled by LeRobot).
     features: Dict[str, Dict[str, Any]] = {
         # Robot joint positions
@@ -403,7 +383,7 @@ def create_lerobot_dataset_v30(
 
         # Finalize the episode on disk and clear temp buffers
         dataset.save_episode(parallel_encoding=bool(parallel_encoding))
-        
+
         # Explicitly trigger garbage collection after each episode
         gc.collect()
 

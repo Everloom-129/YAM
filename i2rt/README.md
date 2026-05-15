@@ -34,17 +34,8 @@ We welcome community contributions that help others learn and implement robotic 
 
 ## Installation
 
-### Install uv from scratch
-
 ```
-git clone https://github.com/i2rt-robotics/i2rt.git && cd i2rt
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source $HOME/.local/bin/env
-uv venv --python 3.11
-source .venv/bin/activate
-```
-
-```bash
+cd i2rt
 sudo apt update
 sudo apt install build-essential python3-dev linux-headers-$(uname -r)
 uv pip install -e .

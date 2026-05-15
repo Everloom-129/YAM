@@ -4,7 +4,7 @@
   <img src="imgs/title.png" />
 </p>
 
-GELLO is a general, low-cost, and intuitive teleoperation framework for robot manipulators. This repository contains all the software components for GELLO. 
+GELLO is a general, low-cost, and intuitive teleoperation framework for robot manipulators. This repository contains all the software components for GELLO.
 
 For additional resources:
 - [Project Website](https://wuphilipp.github.io/gello_site/)
@@ -14,7 +14,6 @@ For additional resources:
 ## Quick Start
 
 ```bash
-git clone https://github.com/wuphilipp/gello_software.git
 cd gello_software
 ```
 
@@ -22,20 +21,10 @@ cd gello_software
 
 ### Option 1: Virtual Environment (Recommended)
 
-First, install uv if you don't have it:
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
-
-Create and activate a virtual environment:
-```bash
-uv venv --python 3.11
-source .venv/bin/activate  # Run this every time you open a new shell
-git submodule init
-git submodule update
-uv pip install -r requirements.txt
-uv pip install -e .
-uv pip install -e third_party/DynamixelSDK/python
+pip install -r requirements.txt
+pip install -e .
+pip install -e third_party/DynamixelSDK/python
 ```
 
 ### Option 2: Docker
@@ -302,9 +291,9 @@ python experiments/run_env.py --agent=gello --bimanual
 ### FACTR Gravity Compensation
 If you want to activate gravity compensation, all the code can be found in `gello/factr`. It works similarly to the regular launch but for now it's self-contained inside its own subdirectory and supports the YAM arm in sim and in hardware.
 
-The YAML provides important fields that can control the strength of the gravity compensation and friction. Feel free to mess around with the strenght and friction til you attain your desired 
+The YAML provides important fields that can control the strength of the gravity compensation and friction. Feel free to mess around with the strenght and friction til you attain your desired
 
-One important step is to add the URDF. We have provided the URDF for the active GELLO in the [Hardware Repository](https://github.com/wuphilipp/gello_mechanical). You will need to update the path in the YAML to the entry point of the URDF. 
+One important step is to add the URDF. We have provided the URDF for the active GELLO in the [Hardware Repository](https://github.com/wuphilipp/gello_mechanical). You will need to update the path in the YAML to the entry point of the URDF.
 ```bash
 python gello/factr/gravity_compensation.py --config configs/yam_gello_factr_hw.yaml
 

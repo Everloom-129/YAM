@@ -1,3 +1,4 @@
+# cameras
 sensors:
   cameras:
     left_camera:
@@ -7,6 +8,7 @@ sensors:
     right_camera:
       device_id: "352122272526"
 
+# robot info
 robot:
   _target_: gello.robots.yam.YAMRobot
   channel: can_leader_l
@@ -61,7 +63,6 @@ lerobot:
 
 # Policy configuration
 policy:
-  # _target_: lerobot.policies.pi05.configuration_pi05.PI05Config
   type: "pi05"
   repo_id: "williamtsai726/add_milk_to_the_coffee_0326"
   # checkpoint_path: "Jiafei1224/pi-snack"
