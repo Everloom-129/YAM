@@ -10,7 +10,7 @@ from gello.utils.logging_utils import get_molmoact_logger
 class MolmoAct(PolicyBase):
     def __init__(self):
         self.logger = get_molmoact_logger()
-        self.url = "https://d29e-71-41-244-70.ngrok-free.app/act"
+        self.url = "https://unachievable-tawana-subtransparent.ngrok-free.dev/act"
         self.multi_views = True
         self.action_horizon = 25
 
@@ -143,7 +143,8 @@ class MolmoAct(PolicyBase):
                     "right_cam": right_img_np,
                     "timestamp": time.time(), # add timestamp for debugging
                     "instruction": instruction,
-                    "state": state
+                    "state": state,
+                    "normalization_tag": "yam_dual_molmoact2"
                 }
 
             self.logger.info("Preparing HTTP request")

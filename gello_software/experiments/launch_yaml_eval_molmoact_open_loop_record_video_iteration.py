@@ -16,7 +16,7 @@ import tyro
 from omegaconf import OmegaConf
 
 from gello.utils.launch_utils import instantiate_from_dict, move_to_start_position
-from gello.dynamixel.driver import DynamixelDriver
+# from gello.dynamixel.driver import DynamixelDriver
 import numpy as np
 
 from gello.data_utils.data_replay import DataReplayer
@@ -87,7 +87,7 @@ def main():
     print(f"Found {len(ids)} camera devices")
     print(ids)
     cameras = {
-        "record_camera": RealSenseCamera("234222300688")
+        "record_camera": RealSenseCamera("037522250599")
     }
 
     bimanual = args.right_config_path is not None
