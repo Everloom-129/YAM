@@ -33,6 +33,7 @@ checkpoints/
 weights/
 
 # Logs / outputs
+data/
 logs/
 outputs/
 wandb/
