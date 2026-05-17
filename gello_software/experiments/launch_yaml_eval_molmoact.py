@@ -245,7 +245,7 @@ def run_session(
     session are still converted.
     """
     storage = left_cfg["storage"]
-    base_save_dir = Path(storage["base_dir"]) / storage["task_directory"]
+    base_save_dir = Path(storage["base_dir"]) / "data" / storage["task_directory"]
     max_steps = int(left_cfg.get("max_steps", 1000))
     last_prompt = storage.get("language_instruction") or ""
 
@@ -382,7 +382,8 @@ def main() -> None:
         f"max_steps: {left_cfg.get('max_steps', 1000)}"
     )
 
-    policy = MolmoAct()
+    server = (left_cfg.get("eval") or {}).get("molmoact_server")
+    policy = MolmoAct(server=server)
     run_session(env=env, policy=policy, left_cfg=left_cfg, num_rollouts=args.num_rollouts)
 
 

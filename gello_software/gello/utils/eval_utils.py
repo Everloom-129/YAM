@@ -179,10 +179,13 @@ class LiveCameraView:
     WINDOW_NAME = "YAM Eval"
     OBS_KEYS = ("left_camera_rgb", "front_camera_rgb", "right_camera_rgb")
     OBS_LABELS = ("LEFT", "FRONT", "RIGHT")
+    # Window grows 2x in each linear dimension on first frame -> 4x screen area.
+    SCALE = 2
 
     def __init__(self, enabled: bool = True) -> None:
         self.enabled = bool(enabled)
         self._initialized = False
+        self._sized = False
 
     def _ensure_window(self) -> None:
         if self._initialized or not self.enabled:
@@ -239,7 +242,12 @@ class LiveCameraView:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA,
             )
 
-        cv2.imshow(self.WINDOW_NAME, cv2.vconcat([header, canvas]))
+        final = cv2.vconcat([header, canvas])
+        cv2.imshow(self.WINDOW_NAME, final)
+        if not self._sized:
+            h, w = final.shape[:2]
+            cv2.resizeWindow(self.WINDOW_NAME, w * self.SCALE, h * self.SCALE)
+            self._sized = True
         key = cv2.waitKey(1) & 0xFF
         if key in (ord("y"), ord("n"), ord("q")):
             return chr(key)

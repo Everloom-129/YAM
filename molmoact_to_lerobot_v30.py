@@ -555,7 +555,7 @@ def load_defaults_from_yaml(config_path: str) -> Dict[str, Any]:
     base_dir = storage.get("base_dir")
     task_directory = storage.get("task_directory")
     if base_dir and task_directory:
-        base_dir_path = Path(base_dir).expanduser()
+        base_dir_path = Path(base_dir).expanduser() / "data"
         defaults["data_dir"] = str(base_dir_path / str(task_directory))
         defaults["output_dir"] = str(base_dir_path / f"{task_directory}_lerobot_v30")
 
