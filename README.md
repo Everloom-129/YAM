@@ -31,7 +31,7 @@ Run these every time the YAM is power-cycled or replugged:
 
 ```bash
 # Reset all CAN interfaces (brings them up at 1 Mbit/s)
-sh i2rt/scripts/reset_all_can.sh
+bash i2rt/scripts/reset_all_can.sh
 
 # Disable the motor timeout on both arms (default is too short for long sessions
 # and causes abrupt collapse during teleop / data collection / eval)
