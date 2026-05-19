@@ -76,4 +76,15 @@ eval:
   #   - a bare host:port (e.g. "10.102.245.84:8202") -- http:// is assumed
   # Trailing "/act" is appended automatically if missing.
   molmoact_server: "10.102.245.84:8202"
+  # Optional camera-server architecture. When enabled=true, the eval launcher
+  # talks to a long-lived camera server over ZMQ instead of opening RealSense
+  # devices itself. Start the server with:
+  #     scripts/start_camera_server.sh configs/yam_left.yaml
+  # The server owns all 3 cameras for the duration of the workstation session;
+  # the eval client pulls a fresh obs only when the policy needs one.
+  camera_server:
+    enabled: false
+    endpoint: "tcp://127.0.0.1:5555"
+    request_timeout_ms: 500
+    max_frame_age_sec: 0.5
   # max_steps and lerobot.* are reused from the existing top-level blocks above.
