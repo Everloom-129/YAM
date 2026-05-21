@@ -145,3 +145,90 @@ class CameraSubscriber:
             self._sock.close(linger=0)
         except Exception:  # noqa: BLE001 — best-effort cleanup
             pass
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Live viewer for the YAM camera server. "
+                    "Defaults to the PUB stream so it doesn't fight the policy for REP."
+    )
+    parser.add_argument(
+        "--mode", choices=("sub", "req"), default="sub",
+        help="sub: subscribe to PUB stream (default). req: poll via REQ/REP.",
+    )
+    parser.add_argument("--rep-endpoint", default="tcp://127.0.0.1:5555")
+    parser.add_argument("--pub-endpoint", default="tcp://127.0.0.1:5556")
+    parser.add_argument("--req-hz", type=float, default=30.0,
+                        help="Polling rate when --mode=req.")
+    parser.add_argument("--window", default="camera_client",
+                        help="cv2 window title.")
+    args = parser.parse_args()
+
+    import cv2  # imported lazily so library users don't pay for it
+
+    def _fetch_sub():
+        return sub.try_recv()
+
+    def _fetch_req():
+        try:
+            return req.get_obs()
+        except CameraClientError as exc:
+            logger.warning("REQ fetch failed: %s", exc)
+            return None
+
+    if args.mode == "sub":
+        sub = CameraSubscriber(args.pub_endpoint)
+        fetch = _fetch_sub
+        period = 0.0  # PUB drives the rate; just spin with a short waitKey
+    else:
+        req = CameraClient(args.rep_endpoint, request_timeout_ms=1000, max_frame_age_sec=None)
+        fetch = _fetch_req
+        period = 1.0 / max(args.req_hz, 1e-3)
+
+    last_fps_t = time.time()
+    fps_frames = 0
+    fps_disp = 0.0
+    last_loop_t = 0.0
+
+    print(f"[camera_client] mode={args.mode} — press 'q' in the window to quit.", flush=True)
+    try:
+        while True:
+            now = time.time()
+            if period and (now - last_loop_t) < period:
+                time.sleep(max(0.0, period - (now - last_loop_t)))
+            last_loop_t = time.time()
+
+            frames = fetch()
+            if frames:
+                panes = []
+                for name, img in frames.items():
+                    bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                    cv2.putText(bgr, name, (8, 24), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7, (0, 255, 0), 2, cv2.LINE_AA)
+                    panes.append(bgr)
+                # Match heights so hstack works even if cameras report different sizes.
+                h = min(p.shape[0] for p in panes)
+                panes = [cv2.resize(p, (int(p.shape[1] * h / p.shape[0]), h)) for p in panes]
+                grid = np.hstack(panes)
+                cv2.putText(grid, f"{fps_disp:5.1f} fps", (8, grid.shape[0] - 12),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.imshow(args.window, grid)
+
+                fps_frames += 1
+                if (last_loop_t - last_fps_t) >= 1.0:
+                    fps_disp = fps_frames / (last_loop_t - last_fps_t)
+                    fps_frames = 0
+                    last_fps_t = last_loop_t
+
+            if (cv2.waitKey(1) & 0xFF) == ord("q"):
+                break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        cv2.destroyAllWindows()
+        if args.mode == "sub":
+            sub.close()
+        else:
+            req.close()

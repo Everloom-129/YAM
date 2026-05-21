@@ -99,7 +99,7 @@ eval:
   # The server owns all 3 cameras for the duration of the workstation session;
   # the eval client pulls a fresh obs only when the policy needs one.
   camera_server:
-    enabled: false
+    enabled: true
     endpoint: "tcp://127.0.0.1:5555"
     request_timeout_ms: 500
     max_frame_age_sec: 0.5
