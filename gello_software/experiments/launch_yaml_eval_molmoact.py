@@ -237,7 +237,10 @@ def run_one_rollout(
             obs_for_policy = env.get_obs()
             input_dict = policy.prepare_input(obs_for_policy, instruction)
             t0 = time.time()
+
+            print("=====inferencing====")
             action_chunk = policy.inference(input_dict)["actions"]
+            print("=====inference done====")
             log_collect_demos(
                 f"Policy inference {time.time() - t0:.3f}s "
                 f"({len(action_chunk)} actions)",
@@ -423,8 +426,15 @@ def main() -> None:
         f"max_steps: {left_cfg.get('max_steps', 1000)}"
     )
 
-    server = (left_cfg.get("eval") or {}).get("molmoact_server")
-    policy = MolmoAct(server=server)
+    eval_cfg = left_cfg.get("eval") or {}
+    mode = eval_cfg.get("mode", "server")
+    if mode == "local":
+        from molmoact import MolmoActLocal
+        policy = MolmoActLocal(**(eval_cfg.get("local") or {}))
+    elif mode == "server":
+        policy = MolmoAct(server=eval_cfg.get("molmoact_server"))
+    else:
+        raise SystemExit(f"eval.mode must be 'server' or 'local', got {mode!r}")
     run_session(env=env, policy=policy, left_cfg=left_cfg, num_rollouts=args.num_rollouts)
 
 
