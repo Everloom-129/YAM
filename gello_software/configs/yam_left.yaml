@@ -103,4 +103,8 @@ eval:
     endpoint: "tcp://127.0.0.1:5555"
     request_timeout_ms: 500
     max_frame_age_sec: 0.5
+    # PUB stream the live cv2 viewer subscribes to. Decouples viewer rendering
+    # from policy.inference() so the viewer keeps refreshing during inference.
+    pub_endpoint: "tcp://127.0.0.1:5556"
+    recv_timeout_ms: 100
   # max_steps and lerobot.* are reused from the existing top-level blocks above.

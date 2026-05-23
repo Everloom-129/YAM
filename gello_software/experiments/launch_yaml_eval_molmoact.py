@@ -280,6 +280,8 @@ def run_session(
     env: RobotEnv,
     policy: MolmoAct,
     left_cfg: Dict[str, Any],
+    right_cfg: Optional[Dict[str, Any]],
+    bimanual: bool,
     num_rollouts: int,
 ) -> None:
     """Drive ``num_rollouts`` rollouts; convert the labeled set to LeRobot at the end.
@@ -294,7 +296,13 @@ def run_session(
     last_prompt = storage.get("language_instruction") or ""
 
     eval_cfg = left_cfg.get("eval") or {}
-    live_view = LiveCameraView(enabled=bool(eval_cfg.get("live_view_enabled", True)))
+    cam_srv_cfg = eval_cfg.get("camera_server") or {}
+    pub_endpoint = cam_srv_cfg.get("pub_endpoint") if cam_srv_cfg.get("enabled") else None
+    live_view = LiveCameraView(
+        enabled=bool(eval_cfg.get("live_view_enabled", True)),
+        pub_endpoint=pub_endpoint,
+        recv_timeout_ms=int(cam_srv_cfg.get("recv_timeout_ms", 100)),
+    )
 
     session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     labeled_rollouts: List[Path] = []
@@ -303,6 +311,7 @@ def run_session(
 
     try:
         for rollout_idx in range(num_rollouts):
+            move_to_start_position(env, bimanual, left_cfg, right_cfg)
             instruction = prompt_instruction(rollout_idx, num_rollouts, last_prompt)
             last_prompt = instruction
 
@@ -435,7 +444,14 @@ def main() -> None:
         policy = MolmoAct(server=eval_cfg.get("molmoact_server"))
     else:
         raise SystemExit(f"eval.mode must be 'server' or 'local', got {mode!r}")
-    run_session(env=env, policy=policy, left_cfg=left_cfg, num_rollouts=args.num_rollouts)
+    run_session(
+        env=env,
+        policy=policy,
+        left_cfg=left_cfg,
+        right_cfg=right_cfg,
+        bimanual=bimanual,
+        num_rollouts=args.num_rollouts,
+    )
 
 
 if __name__ == "__main__":

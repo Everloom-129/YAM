@@ -10,10 +10,13 @@ import concurrent.futures
 import logging
 import shutil
 import sys
+import threading
+import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Deque, Dict, List, Optional, Sequence
 
 import cv2
 import h5py
@@ -172,26 +175,245 @@ class LiveCameraView:
     """Single cv2 window showing the three policy-input frames hconcat'd, with
     a text header and key polling.
 
+    Two modes:
+
+    * ``thread`` (when ``pub_endpoint`` is given): a daemon background thread
+      owns the cv2 window and a ``CameraSubscriber`` connected to the camera
+      server's PUB stream. The thread fetches frames and repaints at camera
+      rate, so the window keeps updating even while the rollout loop is
+      blocked inside ``policy.inference()``. ``update()`` becomes a non-blocking
+      header push + key poll.
+    * ``obs`` (no ``pub_endpoint``): legacy path — cv2 runs on the calling
+      thread, frames come from the ``obs`` dict passed to ``update()``.
+
     ``update()`` returns the lowercase key character ``'y' | 'n' | 'q'`` if one
-    of those is pressed, otherwise ``None``. Other keys are ignored.
+    of those was captured since the last call, otherwise ``None``.
     """
 
     WINDOW_NAME = "YAM Eval"
     OBS_KEYS = ("left_camera_rgb", "front_camera_rgb", "right_camera_rgb")
+    PUB_CAM_NAMES = ("left_camera", "front_camera", "right_camera")
     OBS_LABELS = ("LEFT", "FRONT", "RIGHT")
     # Window grows 2x in each linear dimension on first frame -> 4x screen area.
     SCALE = 2
 
-    def __init__(self, enabled: bool = True) -> None:
+    def __init__(
+        self,
+        enabled: bool = True,
+        pub_endpoint: Optional[str] = None,
+        recv_timeout_ms: int = 100,
+        target_fps: float = 30.0,
+    ) -> None:
         self.enabled = bool(enabled)
+        self.pub_endpoint = pub_endpoint if (self.enabled and pub_endpoint) else None
+        self.recv_timeout_ms = int(recv_timeout_ms)
+        self.target_fps = float(target_fps)
+
+        if not self.enabled:
+            self._mode = "off"
+        elif self.pub_endpoint:
+            self._mode = "thread"
+        else:
+            self._mode = "obs"
+
+        # obs-mode state (cv2 on calling thread)
         self._initialized = False
         self._sized = False
+
+        # thread-mode state
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._sub: Optional[Any] = None  # CameraSubscriber, lazily constructed
+        self._key_buf: Deque[str] = deque(maxlen=8)
+        self._header: Dict[str, Any] = {
+            "rollout_idx": 0, "num_rollouts": 1,
+            "step": 0, "max_steps": 1,
+            "instruction": "",
+        }
+
+    # ------------------------------------------------------------------
+    # Thread mode
+    # ------------------------------------------------------------------
+
+    def _start_thread(self) -> None:
+        from gello.cameras.camera_client import CameraSubscriber  # late import
+        self._sub = CameraSubscriber(self.pub_endpoint, recv_timeout_ms=self.recv_timeout_ms)
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._render_loop, name="LiveCameraView", daemon=True,
+        )
+        self._thread.start()
+
+    def _render_loop(self) -> None:
+        last_frames: Optional[Dict[str, np.ndarray]] = None
+        last_recv_t: float = 0.0
+        wait_ms = max(1, int(1000.0 / max(self.target_fps, 1.0)))
+        window_ready = False
+
+        while not self._stop.is_set():
+            try:
+                frames = self._sub.try_recv() if self._sub is not None else None
+                if frames:
+                    last_frames = frames
+                    last_recv_t = time.monotonic()
+
+                with self._lock:
+                    hdr = dict(self._header)
+
+                canvas = self._build_panes(last_frames)
+                stale = (time.monotonic() - last_recv_t) if last_recv_t else None
+                header = self._build_header(canvas.shape[1], hdr, stale)
+                final = cv2.vconcat([header, canvas])
+
+                if not window_ready:
+                    cv2.namedWindow(self.WINDOW_NAME, cv2.WINDOW_NORMAL)
+                cv2.imshow(self.WINDOW_NAME, final)
+                if not window_ready:
+                    h, w = final.shape[:2]
+                    cv2.resizeWindow(self.WINDOW_NAME, w * self.SCALE, h * self.SCALE)
+                    window_ready = True
+
+                key = cv2.waitKey(wait_ms) & 0xFF
+                if key in (ord("y"), ord("n"), ord("q")):
+                    with self._lock:
+                        self._key_buf.append(chr(key))
+            except Exception:  # noqa: BLE001 — keep the thread alive
+                logger.exception("LiveCameraView render tick failed")
+                self._stop.wait(0.1)
+
+        try:
+            cv2.destroyWindow(self.WINDOW_NAME)
+        except cv2.error:
+            pass
+        if self._sub is not None:
+            try:
+                self._sub.close()
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                pass
+
+    def _build_panes(
+        self, frames: Optional[Dict[str, np.ndarray]],
+    ) -> np.ndarray:
+        if not frames:
+            return self._placeholder_canvas("Waiting for camera server...")
+        panes: List[np.ndarray] = []
+        for name, label in zip(self.PUB_CAM_NAMES, self.OBS_LABELS):
+            img = frames.get(name)
+            if img is None:
+                img = frames.get(name + "_rgb")
+            if img is None:
+                continue
+            bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR).copy()
+            cv2.putText(
+                bgr, label, (10, 28),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA,
+            )
+            panes.append(bgr)
+        if not panes:
+            return self._placeholder_canvas("No camera frames received yet.")
+        max_h = max(p.shape[0] for p in panes)
+        padded = [
+            np.pad(p, ((0, max_h - p.shape[0]), (0, 0), (0, 0))) if p.shape[0] < max_h else p
+            for p in panes
+        ]
+        return cv2.hconcat(padded)
+
+    def _placeholder_canvas(self, msg: str) -> np.ndarray:
+        canvas = np.zeros((360, 1280, 3), dtype=np.uint8)
+        cv2.putText(
+            canvas, msg, (20, 180),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255), 2, cv2.LINE_AA,
+        )
+        return canvas
+
+    def _build_header(
+        self, width: int, hdr: Dict[str, Any], stale_sec: Optional[float],
+    ) -> np.ndarray:
+        header_h = 90
+        header = np.zeros((header_h, width, 3), dtype=np.uint8)
+        rollout_idx = int(hdr.get("rollout_idx", 0))
+        num_rollouts = int(hdr.get("num_rollouts", 1))
+        step = int(hdr.get("step", 0))
+        max_steps = int(hdr.get("max_steps", 1))
+        instruction = str(hdr.get("instruction", ""))
+        first_line = f"Rollout {rollout_idx + 1}/{num_rollouts}    Step {step}/{max_steps}"
+        if stale_sec is not None and stale_sec > 1.0:
+            first_line = f"{first_line}    [stale {stale_sec:.1f}s]"
+        lines = [
+            first_line,
+            f"Instruction: {instruction}",
+            "Keys:  y = success    n = failure    q = quit rollout (saves as eval)",
+        ]
+        for i, line in enumerate(lines):
+            cv2.putText(
+                header, line, (10, 24 + i * 24),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA,
+            )
+        return header
+
+    # ------------------------------------------------------------------
+    # Obs mode (legacy fallback)
+    # ------------------------------------------------------------------
 
     def _ensure_window(self) -> None:
         if self._initialized or not self.enabled:
             return
         cv2.namedWindow(self.WINDOW_NAME, cv2.WINDOW_NORMAL)
         self._initialized = True
+
+    def _update_obs_mode(
+        self,
+        obs: Dict[str, Any],
+        rollout_idx: int,
+        num_rollouts: int,
+        step: int,
+        max_steps: int,
+        instruction: str,
+    ) -> Optional[str]:
+        self._ensure_window()
+        panes: List[np.ndarray] = []
+        for obs_key, label in zip(self.OBS_KEYS, self.OBS_LABELS):
+            rgb = obs.get(obs_key)
+            if rgb is None:
+                continue
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR).copy()
+            cv2.putText(
+                bgr, label, (10, 28),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA,
+            )
+            panes.append(bgr)
+        if not panes:
+            return None
+        max_h = max(p.shape[0] for p in panes)
+        padded = [
+            np.pad(p, ((0, max_h - p.shape[0]), (0, 0), (0, 0))) if p.shape[0] < max_h else p
+            for p in panes
+        ]
+        canvas = cv2.hconcat(padded)
+        header = self._build_header(
+            canvas.shape[1],
+            {
+                "rollout_idx": rollout_idx, "num_rollouts": num_rollouts,
+                "step": step, "max_steps": max_steps,
+                "instruction": instruction,
+            },
+            stale_sec=None,
+        )
+        final = cv2.vconcat([header, canvas])
+        cv2.imshow(self.WINDOW_NAME, final)
+        if not self._sized:
+            h, w = final.shape[:2]
+            cv2.resizeWindow(self.WINDOW_NAME, w * self.SCALE, h * self.SCALE)
+            self._sized = True
+        key = cv2.waitKey(1) & 0xFF
+        if key in (ord("y"), ord("n"), ord("q")):
+            return chr(key)
+        return None
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def update(
         self,
@@ -204,57 +426,46 @@ class LiveCameraView:
     ) -> Optional[str]:
         if not self.enabled:
             return None
-        self._ensure_window()
 
-        panes: List[np.ndarray] = []
-        for obs_key, label in zip(self.OBS_KEYS, self.OBS_LABELS):
-            rgb = obs.get(obs_key)
-            if rgb is None:
-                continue
-            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR).copy()
-            cv2.putText(
-                bgr, label, (10, 28),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA,
-            )
-            panes.append(bgr)
+        if self._mode == "thread" and self._thread is None:
+            try:
+                self._start_thread()
+            except Exception:  # noqa: BLE001 — fall back to obs mode
+                logger.exception(
+                    "LiveCameraView: failed to start PUB thread; falling back to obs mode"
+                )
+                self._mode = "obs"
 
-        if not panes:
-            return None
+        if self._mode == "thread":
+            with self._lock:
+                self._header = {
+                    "rollout_idx": rollout_idx,
+                    "num_rollouts": num_rollouts,
+                    "step": step,
+                    "max_steps": max_steps,
+                    "instruction": instruction,
+                }
+                key = self._key_buf.popleft() if self._key_buf else None
+            return key
 
-        # Pad panes to the same height before hconcat (defensive — they should match).
-        max_h = max(p.shape[0] for p in panes)
-        padded = [
-            np.pad(p, ((0, max_h - p.shape[0]), (0, 0), (0, 0))) if p.shape[0] < max_h else p
-            for p in panes
-        ]
-        canvas = cv2.hconcat(padded)
-
-        header_h = 90
-        header = np.zeros((header_h, canvas.shape[1], 3), dtype=np.uint8)
-        lines = [
-            f"Rollout {rollout_idx + 1}/{num_rollouts}    Step {step}/{max_steps}",
-            f"Instruction: {instruction}",
-            "Keys:  y = success    n = failure    q = quit rollout (saves as eval)",
-        ]
-        for i, line in enumerate(lines):
-            cv2.putText(
-                header, line, (10, 24 + i * 24),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA,
-            )
-
-        final = cv2.vconcat([header, canvas])
-        cv2.imshow(self.WINDOW_NAME, final)
-        if not self._sized:
-            h, w = final.shape[:2]
-            cv2.resizeWindow(self.WINDOW_NAME, w * self.SCALE, h * self.SCALE)
-            self._sized = True
-        key = cv2.waitKey(1) & 0xFF
-        if key in (ord("y"), ord("n"), ord("q")):
-            return chr(key)
-        return None
+        return self._update_obs_mode(
+            obs=obs,
+            rollout_idx=rollout_idx,
+            num_rollouts=num_rollouts,
+            step=step,
+            max_steps=max_steps,
+            instruction=instruction,
+        )
 
     def close(self) -> None:
-        if self._initialized:
+        if self._thread is not None:
+            self._stop.set()
+            try:
+                self._thread.join(timeout=2.0)
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                pass
+            self._thread = None
+        elif self._initialized:
             try:
                 cv2.destroyWindow(self.WINDOW_NAME)
             except cv2.error:
