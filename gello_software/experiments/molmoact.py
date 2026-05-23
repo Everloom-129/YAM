@@ -6,19 +6,19 @@ import threading
 import time
 from typing import Any, List, Optional
 
+import hf_transfer  # noqa: F401
+import json_numpy
 import numpy as np
 import requests
 import torch
-import json_numpy
-
-# NOTE: do NOT call `json_numpy.patch()` here. It monkey-patches the stdlib
-# json.loads process-wide and blows up any third-party code that calls
-# `json.loads(s, object_hook=<hook returning non-dict>)` — notably
-# numpy.testing._private.utils (pulled in via transformers → scipy in local
-# mode). Use explicit `json_numpy.dumps(...)` / `json_numpy.loads(...)` instead.
+from huggingface_hub import snapshot_download
+from PIL import Image
+from transformers import AutoModelForImageTextToText, AutoProcessor
 
 from policy_base import PolicyBase
 from gello.utils.logging_utils import get_molmoact_logger
+
+os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 
 DEFAULT_SERVER = "https://unachievable-tawana-subtransparent.ngrok-free.dev"
 
@@ -238,10 +238,7 @@ class MolmoAct(PolicyBase):
 # below are inlined from
 #     molmoact2/examples/yam/host_server_yam.py @ 1ab6e95
 # with the FastAPI server bits stripped. Keep this block in sync upstream if
-# the patch needles or `predict_action` signature change. `transformers`,
-# `huggingface_hub`, and `PIL` are imported lazily so plain `from molmoact
-# import MolmoAct` (HTTP-only path) still works on machines that don't have
-# those installed.
+# the patch needles or `predict_action` signature change. 
 
 _local_log = logging.getLogger("molmoact.local")
 
@@ -300,7 +297,6 @@ def _patch_modeling_for_bf16(local_dir: str) -> None:
 
 
 def _to_pil(arr: Any):
-    from PIL import Image  # lazy import — only needed in local mode
     if isinstance(arr, Image.Image):
         return arr.convert("RGB")
     a = np.asarray(arr)
@@ -321,15 +317,6 @@ class _LocalPolicy:
         dtype: torch.dtype,
         enable_cuda_graph: bool = False,
     ) -> None:
-        from huggingface_hub import snapshot_download
-        from transformers import AutoModelForImageTextToText, AutoProcessor
-
-        try:
-            import hf_transfer  # noqa: F401
-            os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
-        except ImportError:
-            pass
-
         self.default_cuda_graph = enable_cuda_graph
 
         local_dir = snapshot_download(repo_id=repo_id)

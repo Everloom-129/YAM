@@ -42,9 +42,10 @@ from gello.utils.eval_utils import (
     prompt_instruction,
     resolve_label,
 )
+from gello.robots.robot import BimanualRobot
 from gello.utils.launch_utils import instantiate_from_dict, move_to_start_position
 from gello.utils.logging_utils import log_collect_demos
-from molmoact import MolmoAct
+from molmoact import MolmoAct, MolmoActLocal
 
 
 logger = logging.getLogger(__name__)
@@ -159,7 +160,6 @@ def _build_env(
     left_robot = instantiate_from_dict(left_robot_cfg)
 
     if bimanual:
-        from gello.robots.robot import BimanualRobot
         right_robot_cfg = right_cfg["robot"]
         if isinstance(right_robot_cfg.get("config"), str):
             right_robot_cfg["config"] = OmegaConf.to_container(
@@ -230,17 +230,13 @@ def run_one_rollout(
     action_chunk: Optional[List[Any]] = None
 
     for step in range(max_steps):
-        # Refresh the policy's action chunk every ``chunk_size`` outer steps.
-        # The obs used by the policy is sampled exactly once per chunk; per-step
-        # obs (used for save / live view) is sampled fresh below.
         if action_chunk is None or (step % chunk_size) == 0:
             obs_for_policy = env.get_obs()
             input_dict = policy.prepare_input(obs_for_policy, instruction)
             t0 = time.time()
 
-            print("=====inferencing====")
             action_chunk = policy.inference(input_dict)["actions"]
-            print("=====inference done====")
+            
             log_collect_demos(
                 f"Policy inference {time.time() - t0:.3f}s "
                 f"({len(action_chunk)} actions)",
@@ -348,7 +344,6 @@ def run_session(
             else:
                 print(f"  -> kept in eval/: {rollout_dir}")
 
-            # Clear references so the KeyboardInterrupt path doesn't re-flush.
             saver = None
             outcome = None
     except KeyboardInterrupt:
@@ -438,7 +433,6 @@ def main() -> None:
     eval_cfg = left_cfg.get("eval") or {}
     mode = eval_cfg.get("mode", "server")
     if mode == "local":
-        from molmoact import MolmoActLocal
         policy = MolmoActLocal(**(eval_cfg.get("local") or {}))
     elif mode == "server":
         policy = MolmoAct(server=eval_cfg.get("molmoact_server"))

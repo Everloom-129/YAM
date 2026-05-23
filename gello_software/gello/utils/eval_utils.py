@@ -23,6 +23,13 @@ import h5py
 import numpy as np
 from PIL import Image
 
+from gello.cameras.camera_client import CameraSubscriber
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from molmoact_to_lerobot_v30 import create_lerobot_dataset_v30, load_droid_layout_data
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -237,7 +244,6 @@ class LiveCameraView:
     # ------------------------------------------------------------------
 
     def _start_thread(self) -> None:
-        from gello.cameras.camera_client import CameraSubscriber  # late import
         self._sub = CameraSubscriber(self.pub_endpoint, recv_timeout_ms=self.recv_timeout_ms)
         self._stop.clear()
         self._thread = threading.Thread(
@@ -595,15 +601,6 @@ def convert_session_to_lerobot(
     if not session_rollout_dirs:
         logger.info("No labeled rollouts to convert.")
         return None
-
-    # Late import — the converter pulls in lerobot which is heavy.
-    repo_root = Path(__file__).resolve().parents[3]
-    if str(repo_root) not in sys.path:
-        sys.path.insert(0, str(repo_root))
-    from molmoact_to_lerobot_v30 import (  # noqa: WPS433 — intentional late import
-        create_lerobot_dataset_v30,
-        load_droid_layout_data,
-    )
 
     output_dir = Path(output_dir)
     if output_dir.exists() and any(output_dir.iterdir()):
