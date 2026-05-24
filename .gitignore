@@ -15,6 +15,9 @@ videos/
 *.mov
 *.mkv
 
+
+logs/
+
 # Dataset / experiment artifacts
 # *.hdf5
 # *.h5
