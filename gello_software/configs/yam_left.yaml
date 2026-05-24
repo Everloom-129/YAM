@@ -26,6 +26,7 @@ hz: 30
 max_steps: 1000
 
 # Data collection configuration
+# TODO add a flag to selectively save the data or not
 collection:
   max_episode_length: 10000
   act_noise_std: 0.001
@@ -71,9 +72,46 @@ policy:
 # Eval session configuration (used by launch_yaml_eval_molmoact.py)
 eval:
   live_view_enabled: true        # show the 3-pane cv2 window during rollouts
-  # MolmoAct inference server. Accepts either:
+  # How to run inference:
+  #   server -> POST observations to a remote FastAPI MolmoAct server (default)
+  #   local  -> load the MolmoAct checkpoint in-process via transformers
+  # when mode == server. Accepts either:
   #   - a full URL (e.g. "https://<ngrok-subdomain>.ngrok-free.dev")
   #   - a bare host:port (e.g. "10.102.245.84:8202") -- http:// is assumed
   # Trailing "/act" is appended automatically if missing.
-  molmoact_server: "10.102.245.84:8202"
+
+  # uncomment this 2 lines to use server
+  # mode: server #
+  # molmoact_server: "10.102.245.84:8202"
+  
+  # Used when mode == local. Requires transformers (+ huggingface_hub, PIL,
+  # accelerate, safetensors) installed in the active env. bf16 needs ~10-14 GB
+  # VRAM; fp32 needs ~26 GB. Warmup eats the ~30 s first-call latency at
+  # startup so rollout step 0 isn't slow.
+
+  # uncomment following  lines to use server
+  mode: local
+  local:
+    repo_id: "allenai/MolmoAct2-BimanualYAM"
+    device: "cuda:0"
+    dtype: "bfloat16"            # bfloat16 | float16 | float32
+    num_steps: 10                # denoising steps!! 
+    enable_cuda_graph: false
+    warmup: true                # warm up the model with dummy obs
+
+  # Optional camera-server architecture. When enabled=true, the eval launcher
+  # talks to a long-lived camera server over ZMQ instead of opening RealSense
+  # devices itself. Start the server with:
+  #     scripts/start_camera_server.sh configs/yam_left.yaml
+  # The server owns all 3 cameras for the duration of the workstation session;
+  # the eval client pulls a fresh obs only when the policy needs one.
+  camera_server:
+    enabled: true
+    endpoint: "tcp://127.0.0.1:5555"
+    request_timeout_ms: 500
+    max_frame_age_sec: 0.5
+    # PUB stream the live cv2 viewer subscribes to. Decouples viewer rendering
+    # from policy.inference() so the viewer keeps refreshing during inference.
+    pub_endpoint: "tcp://127.0.0.1:5556"
+    recv_timeout_ms: 100
   # max_steps and lerobot.* are reused from the existing top-level blocks above.

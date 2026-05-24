@@ -16,6 +16,7 @@ Top-level layout:
 | `oculus_reader/` | Optional Oculus VR teleop input. |
 | `robots_realtime/` | Newer realtime-control sandbox (untracked in git on this machine). |
 | `molmoact_to_lerobot_v30.py` | Top-level converter: raw collected JSON → LeRobot v3.0 dataset, with optional HF upload + tag. |
+| `docs/` | Lab-facing tutorials; `docs/grasp_lab_eval.md` is the GRASP rig walkthrough. |
 | `videos/` | Gitignored output dir. |
 
 ## This machine's environment
@@ -46,10 +47,36 @@ python i2rt/i2rt/motor_config_tool/set_zero.py --channel=can_follower_r --motor_
 - `launch_yaml.py` — bimanual teleop.
 - `launch_yaml_collect_data.py` — teleop + data collection + auto-convert/upload pipeline.
 - `launch_yaml_eval.py` — eval for `dp` (DiffusionPolicy) or `pi05` (PI05Policy); selected via `configs/yam_left.yaml: policy.type`.
-- `launch_yaml_eval_molmoact.py` — eval against a remote MolmoAct-v2 server (URL hardcoded near top of `molmoact.py`, ~line 13). Session-based: `-n N` runs N rollouts, prompts for an instruction per rollout (Enter reuses last), shows a live 3-pane cv2 view; press `y`/`n`/`q` in the cv2 window to end + label, or let it time out for a stdin prompt. Saves PNG + `episode.h5` per rollout under `{base_dir}/{task_directory}/{eval,success,failure}/...` (DROID-style), then batch-converts labeled rollouts to a LeRobot v3.0 dataset under `eval_lerobot_v30/{session_ts}/` at end-of-session. Helpers live in `gello/utils/eval_utils.py`.
+- `launch_yaml_eval_molmoact.py` — eval against the MolmoAct-v2 policy. `eval.mode` in `yam_left.yaml` picks `local` (in-process `MolmoActLocal` loading the HF snapshot via transformers; needs ~10–14 GB VRAM at bf16) or `server` (HTTP POST to a remote FastAPI server at `eval.molmoact_server`; accepts a full URL or bare `host:port`). Session-based: `-n N` runs N rollouts, arm interpolates to `agent.start_joints` between rollouts before each instruction prompt (Enter reuses last). A live 3-pane cv2 view shows LEFT / FRONT / RIGHT; press `y`/`n`/`q` in that window to end + label, or let it time out for a stdin prompt. When the camera server is on (default) the viewer is driven by a daemon thread subscribed to the PUB stream, so it keeps repainting through `policy.inference()`. Saves PNG + `episode.h5` per rollout under `{base_dir}/data/{task_directory}/{eval,success,failure}/...` (DROID-style), then batch-converts labeled rollouts to a LeRobot v3.0 dataset under `eval_lerobot_v30/{session_ts}/` at end-of-session. Helpers live in `gello/utils/eval_utils.py`. End-user walkthrough: `docs/grasp_lab_eval.md`.
 - `launch_yaml_replay.py`, `launch_yaml_open_loop.py`, `launch_yaml_molmoact_open_loop.py` — replay / open-loop testing from collected JSON episodes.
 
 All launchers take `--left_config_path` and `--right_config_path`; most config knobs (cameras, storage, lerobot conversion, policy) live in `configs/yam_left.yaml` — `yam_right.yaml` mainly carries the right-arm robot/agent block.
+
+## Camera server (eval-only)
+
+`gello_software/gello/cameras/camera_server.py` runs the three RealSense pipelines in a long-lived process and serves the latest frames over ZMQ (REP on `:5555`, PUB on `:5556`). `camera_client.py` exposes `CameraClient` (REQ-side wrapper the policy uses for on-demand obs) and `CameraSubscriber` (SUB-side, drained by the `LiveCameraView` render thread). `RobotEnv` accepts a `camera_client=` kwarg and a `step_command_only(joints)` so sub-step interpolation no longer reads cameras.
+
+Why: in the old path `dynamic_smoothing` re-read all 3 cameras on every interpolation tick (up to 100× per outer step). With the server architecture cameras stay warm across sessions and are sampled only when the policy actually needs an obs; the cv2 viewer subscribes to the PUB stream from a daemon thread so it keeps painting through `policy.inference()`.
+
+Default-on for the MolmoAct eval launcher via `eval.camera_server.enabled: true` in `yam_left.yaml`. Two-terminal usage:
+
+```bash
+# Terminal A: leaves cameras hot across the workstation session
+bash gello_software/scripts/start_camera_server.sh    # script hardcodes --config configs/yam_left.yaml
+# Terminal B: run eval as usual
+```
+
+Set `eval.camera_server.enabled: false` to fall back to the in-process camera path (slower; the viewer freezes during inference). Data collection / replay / open-loop launchers still use the in-process path — the flag is per-launcher.
+
+## Tests
+
+`gello_software/tests/` has pytest coverage for the camera server (`_snapshot`, `_maybe_heartbeat`, end-to-end REQ/REP wire protocol, stale-frame detection) and the MolmoAct eval launcher (`dynamic_smoothing`, `_park_robot`, `_convert_if_any`, `run_one_rollout`). All tests use inline fakes — no RealSense / no CAN motors required.
+
+```bash
+cd gello_software && python -m pytest tests/ -q
+```
+
+`tests/conftest.py` puts `experiments/` on `sys.path` so `from molmoact import ...` resolves the same way the launcher resolves it at runtime.
 
 ## Conventions / gotchas
 

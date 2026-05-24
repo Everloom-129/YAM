@@ -30,6 +30,7 @@ import torch
 import tyro
 from omegaconf import OmegaConf
 
+from gello.cameras.camera_client import CameraClient
 from gello.cameras.realsense_camera import RealSenseCamera, get_device_ids
 from gello.env import RobotEnv
 from gello.utils.eval_utils import (
@@ -41,9 +42,10 @@ from gello.utils.eval_utils import (
     prompt_instruction,
     resolve_label,
 )
+from gello.robots.robot import BimanualRobot
 from gello.utils.launch_utils import instantiate_from_dict, move_to_start_position
 from gello.utils.logging_utils import log_collect_demos
-from molmoact import MolmoAct
+from molmoact import MolmoAct, MolmoActLocal
 
 
 logger = logging.getLogger(__name__)
@@ -103,10 +105,15 @@ class Args:
 def _build_env(
     args: Args,
 ) -> Tuple[RobotEnv, Dict[str, Any], Optional[Dict[str, Any]], bool]:
-    """Build cameras + robot(s) + RobotEnv from the launch configs."""
-    ids = get_device_ids()
-    print(f"Found {len(ids)} camera devices: {ids}")
+    """Build cameras + robot(s) + RobotEnv from the launch configs.
 
+    Camera source is decided by the ``eval.camera_server.enabled`` flag in the
+    left config:
+
+    * ``true``  -> connect to the long-lived camera server over ZMQ. RealSense
+      devices are owned by that server; this process never opens them.
+    * ``false`` -> open ``RealSenseCamera`` objects in-process (legacy path).
+    """
     left_cfg = OmegaConf.to_container(OmegaConf.load(args.left_config_path), resolve=True)
     bimanual = args.right_config_path is not None
     right_cfg = (
@@ -114,12 +121,36 @@ def _build_env(
         if bimanual else None
     )
 
-    camera_cfg = left_cfg["sensors"]["cameras"]
-    cameras = {
-        "left_camera": RealSenseCamera(camera_cfg["left_camera"]["device_id"]),
-        "front_camera": RealSenseCamera(camera_cfg["front_camera"]["device_id"]),
-        "right_camera": RealSenseCamera(camera_cfg["right_camera"]["device_id"]),
-    }
+    cam_server_cfg = ((left_cfg.get("eval") or {}).get("camera_server") or {})
+    use_server = bool(cam_server_cfg.get("enabled", False))
+
+    camera_dict = None
+    camera_client = None
+    if use_server:
+        endpoint = str(cam_server_cfg.get("endpoint", "tcp://127.0.0.1:5555"))
+        timeout_ms = int(cam_server_cfg.get("request_timeout_ms", 500))
+        max_age = cam_server_cfg.get("max_frame_age_sec", 0.5)
+        max_age = float(max_age) if max_age is not None else None
+        print(f"[eval] Using camera server at {endpoint} (timeout={timeout_ms} ms)")
+        camera_client = CameraClient(
+            endpoint=endpoint,
+            request_timeout_ms=timeout_ms,
+            max_frame_age_sec=max_age,
+        )
+        if not camera_client.ping():
+            raise RuntimeError(
+                f"Camera server at {endpoint} did not respond to ping. "
+                "Start it with scripts/start_camera_server.sh."
+            )
+    else:
+        ids = get_device_ids()
+        print(f"Found {len(ids)} camera devices: {ids}")
+        camera_cfg = left_cfg["sensors"]["cameras"]
+        camera_dict = {
+            "left_camera": RealSenseCamera(camera_cfg["left_camera"]["device_id"]),
+            "front_camera": RealSenseCamera(camera_cfg["front_camera"]["device_id"]),
+            "right_camera": RealSenseCamera(camera_cfg["right_camera"]["device_id"]),
+        }
 
     left_robot_cfg = left_cfg["robot"]
     if isinstance(left_robot_cfg.get("config"), str):
@@ -129,7 +160,6 @@ def _build_env(
     left_robot = instantiate_from_dict(left_robot_cfg)
 
     if bimanual:
-        from gello.robots.robot import BimanualRobot
         right_robot_cfg = right_cfg["robot"]
         if isinstance(right_robot_cfg.get("config"), str):
             right_robot_cfg["config"] = OmegaConf.to_container(
@@ -140,7 +170,12 @@ def _build_env(
     else:
         robot = left_robot
 
-    env = RobotEnv(robot, control_rate_hz=left_cfg.get("hz", 30), camera_dict=cameras)
+    env = RobotEnv(
+        robot,
+        control_rate_hz=left_cfg.get("hz", 30),
+        camera_dict=camera_dict,
+        camera_client=camera_client,
+    )
     return env, left_cfg, right_cfg, bimanual
 
 
@@ -150,17 +185,23 @@ def _build_env(
 
 
 def dynamic_smoothing(env: RobotEnv, target_joints: np.ndarray) -> Dict[str, Any]:
-    """Apply ``target_joints`` via sub-tick linear interpolation. Returns final obs."""
-    curr_joints = env.get_obs()["joint_positions"]
+    """Apply ``target_joints`` via sub-tick linear interpolation. Returns final obs.
+
+    The interpolation sub-steps issue command-only ticks (no camera reads). A
+    single ``get_obs()`` at the end produces the obs the caller actually
+    consumes — this is what makes the rollout loop run at robot rate instead
+    of camera rate.
+    """
+    curr_joints = env.get_robot_state()["joint_positions"]
     max_delta = float(np.abs(curr_joints - target_joints).max())
     steps = min(int(max_delta / 0.01), 100)
     if steps <= 1:
-        return env.step(target_joints)
-    obs: Optional[Dict[str, Any]] = None
-    for jnt in np.linspace(curr_joints, target_joints, steps):
-        obs = env.step(jnt)
-        time.sleep(0.001)
-    return obs  # type: ignore[return-value]  # at least one iteration executed
+        env.step_command_only(target_joints)
+    else:
+        for jnt in np.linspace(curr_joints, target_joints, steps):
+            env.step_command_only(jnt)
+            time.sleep(0.001)
+    return env.get_obs()
 
 
 def run_one_rollout(
@@ -189,14 +230,13 @@ def run_one_rollout(
     action_chunk: Optional[List[Any]] = None
 
     for step in range(max_steps):
-        # Refresh the policy's action chunk every ``chunk_size`` outer steps.
-        # The obs used by the policy is sampled exactly once per chunk; per-step
-        # obs (used for save / live view) is sampled fresh below.
         if action_chunk is None or (step % chunk_size) == 0:
             obs_for_policy = env.get_obs()
             input_dict = policy.prepare_input(obs_for_policy, instruction)
             t0 = time.time()
+
             action_chunk = policy.inference(input_dict)["actions"]
+            
             log_collect_demos(
                 f"Policy inference {time.time() - t0:.3f}s "
                 f"({len(action_chunk)} actions)",
@@ -236,6 +276,8 @@ def run_session(
     env: RobotEnv,
     policy: MolmoAct,
     left_cfg: Dict[str, Any],
+    right_cfg: Optional[Dict[str, Any]],
+    bimanual: bool,
     num_rollouts: int,
 ) -> None:
     """Drive ``num_rollouts`` rollouts; convert the labeled set to LeRobot at the end.
@@ -250,7 +292,13 @@ def run_session(
     last_prompt = storage.get("language_instruction") or ""
 
     eval_cfg = left_cfg.get("eval") or {}
-    live_view = LiveCameraView(enabled=bool(eval_cfg.get("live_view_enabled", True)))
+    cam_srv_cfg = eval_cfg.get("camera_server") or {}
+    pub_endpoint = cam_srv_cfg.get("pub_endpoint") if cam_srv_cfg.get("enabled") else None
+    live_view = LiveCameraView(
+        enabled=bool(eval_cfg.get("live_view_enabled", True)),
+        pub_endpoint=pub_endpoint,
+        recv_timeout_ms=int(cam_srv_cfg.get("recv_timeout_ms", 100)),
+    )
 
     session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     labeled_rollouts: List[Path] = []
@@ -259,6 +307,7 @@ def run_session(
 
     try:
         for rollout_idx in range(num_rollouts):
+            move_to_start_position(env, bimanual, left_cfg, right_cfg)
             instruction = prompt_instruction(rollout_idx, num_rollouts, last_prompt)
             last_prompt = instruction
 
@@ -295,7 +344,6 @@ def run_session(
             else:
                 print(f"  -> kept in eval/: {rollout_dir}")
 
-            # Clear references so the KeyboardInterrupt path doesn't re-flush.
             saver = None
             outcome = None
     except KeyboardInterrupt:
@@ -382,9 +430,22 @@ def main() -> None:
         f"max_steps: {left_cfg.get('max_steps', 1000)}"
     )
 
-    server = (left_cfg.get("eval") or {}).get("molmoact_server")
-    policy = MolmoAct(server=server)
-    run_session(env=env, policy=policy, left_cfg=left_cfg, num_rollouts=args.num_rollouts)
+    eval_cfg = left_cfg.get("eval") or {}
+    mode = eval_cfg.get("mode", "server")
+    if mode == "local":
+        policy = MolmoActLocal(**(eval_cfg.get("local") or {}))
+    elif mode == "server":
+        policy = MolmoAct(server=eval_cfg.get("molmoact_server"))
+    else:
+        raise SystemExit(f"eval.mode must be 'server' or 'local', got {mode!r}")
+    run_session(
+        env=env,
+        policy=policy,
+        left_cfg=left_cfg,
+        right_cfg=right_cfg,
+        bimanual=bimanual,
+        num_rollouts=args.num_rollouts,
+    )
 
 
 if __name__ == "__main__":
