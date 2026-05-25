@@ -79,7 +79,9 @@ class GripperType(enum.Enum):
 
     def get_motor_kp_kd(self) -> tuple[float, float]:
         if self in [GripperType.CRANK_4310, GripperType.LINEAR_4310]:
-            return 20, 0.5
+            # Lowered from 20 -> 10 to reduce sustained current when the
+            # gripper is closed against an object (J7 was running hot).
+            return 10, 0.5
         elif self in [GripperType.LINEAR_3507]:
             return 10, 0.3
         elif self == GripperType.YAM_TEACHING_HANDLE:
