@@ -30,9 +30,10 @@ conda activate ai2_yam
 # Bring CAN interfaces up at 1 Mbit (sudo password required the first time)
 bash i2rt/scripts/reset_all_can.sh
 
-# Disable the motor watchdog so arms don't collapse during long sessions
-python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_leader_l
-python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_follower_r
+# Enable the 400ms motor safety watchdog (saved to flash). On ctrl+C the arms auto-de-energize
+# ~400ms later (LED green->red) instead of staying powered; the 250Hz loop keeps it fed mid-run.
+python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_leader_l --timeout
+python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_follower_r --timeout
 ```
 
 Optional — only if the linear gripper drifted at power-on and `set_timeout` reported the gripper motor outside its expected range:
@@ -142,8 +143,8 @@ The camera server isn't running, or it died. Restart Terminal A: `bash gello_sof
 **`Stale frame from front_camera: 1.3s old (>0.500s).`**
 A camera stopped streaming (USB renegotiated, cable loose, RealSense firmware hiccup). The camera server is still up, but at least one pipeline is wedged. Restart Terminal A.
 
-**Arms collapse a few seconds after launching.**
-You skipped the `set_timeout.py` step. Park the arms manually, then run both `set_timeout.py` commands from §1.
+**Arms collapse / go limp shortly after launching.**
+The 400ms safety watchdog tripped because no command reached the motors in time — usually the launcher never got to its control loop, or the `set_timeout.py` step in §1 didn't take. Park the arms manually, re-run both `set_timeout.py --timeout` commands from §1 to confirm the watchdog is at 400ms (not a stale/shorter value), then relaunch and make sure it reaches the control loop.
 
 **`from gello.cameras... ImportError`** when running the eval launcher.
 You're not in the `ai2_yam` conda env (or it's missing deps). `conda activate ai2_yam` and retry.
