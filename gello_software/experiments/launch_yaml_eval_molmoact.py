@@ -403,12 +403,37 @@ def _convert_if_any(
 # ---------------------------------------------------------------------------
 
 
+def _build_policy(left_cfg: Dict[str, Any]) -> MolmoAct:
+    """Construct the eval policy from the left config's ``eval`` block.
+
+    Built BEFORE the robot is energized (see ``main``): ``MolmoActLocal`` loads
+    a multi-GB snapshot onto the GPU and holds the GIL for seconds, which would
+    starve the CAN command thread and trip the 400ms motor watchdog if the
+    motors were already live.
+    """
+    eval_cfg = left_cfg.get("eval") or {}
+    mode = eval_cfg.get("mode", "server")
+    if mode == "local":
+        return MolmoActLocal(**(eval_cfg.get("local") or {}))
+    elif mode == "server":
+        return MolmoAct(server=eval_cfg.get("molmoact_server"))
+    raise SystemExit(f"eval.mode must be 'server' or 'local', got {mode!r}")
+
+
 def main() -> None:
     atexit.register(_park_robot)
 
     args = tyro.cli(Args)
     if args.num_rollouts < 1:
         raise SystemExit("--num_rollouts must be >= 1")
+
+    # Load the policy BEFORE building the robot. Energizing the motors starts a
+    # ~250Hz background CAN command thread; a heavy, GIL-holding model load done
+    # while the motors are live starves that thread, the 400ms watchdog fires,
+    # and the motors report "loss communication" (both buses drop at once). So
+    # do the expensive load here, then energize.
+    left_cfg_pre = OmegaConf.to_container(OmegaConf.load(args.left_config_path), resolve=True)
+    policy = _build_policy(left_cfg_pre)
 
     env, left_cfg, right_cfg, bimanual = _build_env(args)
 
@@ -430,14 +455,6 @@ def main() -> None:
         f"max_steps: {left_cfg.get('max_steps', 1000)}"
     )
 
-    eval_cfg = left_cfg.get("eval") or {}
-    mode = eval_cfg.get("mode", "server")
-    if mode == "local":
-        policy = MolmoActLocal(**(eval_cfg.get("local") or {}))
-    elif mode == "server":
-        policy = MolmoAct(server=eval_cfg.get("molmoact_server"))
-    else:
-        raise SystemExit(f"eval.mode must be 'server' or 'local', got {mode!r}")
     run_session(
         env=env,
         policy=policy,

@@ -33,14 +33,14 @@ Top-level layout:
 ```bash
 conda activate ai2_yam
 sh i2rt/scripts/reset_all_can.sh
-python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_leader_l
-python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_follower_r
+python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_leader_l --timeout
+python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_follower_r --timeout
 # Only if using the linear gripper at full grip and the gripper drifted on power-cycle:
 python i2rt/i2rt/motor_config_tool/set_zero.py --channel=can_leader_l --motor_id=7
 python i2rt/i2rt/motor_config_tool/set_zero.py --channel=can_follower_r --motor_id=7
 ```
 
-`set_timeout.py` with no `--timeout` flag sets timeout to `0` (disabled) for motors 1–7. That is the desired state for long teleop / data collection runs — the default motor timeout otherwise causes arms to collapse.
+`set_timeout.py --timeout` sets the motor watchdog to **400ms** (writes `8000`; 8000 × 0.05ms = 400ms) for motors 1–7 and saves it to flash (persists across power cycles). This is the desired state: on `ctrl+C` the command stream stops and the motors auto-de-energize (damping) ~400ms later — the arm safely powers down (LED green→red) instead of holding torque and forcing a physical power-cut. Do **not** use the no-flag form (`set_timeout.py` without `--timeout`), which writes `0` = watchdog disabled — that leaves the arm energized after exit. 400ms does not cause mid-run collapse: the CAN command stream is driven by a dedicated 250Hz background thread (`i2rt/i2rt/robots/motor_chain_robot.py:start_server`), giving ~100× margin; the watchdog only fires when the stream genuinely stops (i.e. on shutdown). The old "default timeout is too short / causes collapse" note was wrong — 400ms is the factory default and is fine for teleop/eval. **One caveat:** that 250Hz thread is pure Python, so a multi-second GIL-holding operation on the main thread *while the motors are live* will starve it and trip the watchdog — symptom is both buses reporting `loss communication` at the same instant. The MolmoAct local model load is exactly such an operation, which is why `launch_yaml_eval_molmoact.py` loads the policy (`_build_policy`) **before** `_build_env` energizes the motors. Keep any heavy/blocking init ahead of robot construction.
 
 ## Key entry points (`gello_software/experiments/`)
 

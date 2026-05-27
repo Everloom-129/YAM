@@ -33,10 +33,12 @@ Run these every time the YAM is power-cycled or replugged:
 # Reset all CAN interfaces (brings them up at 1 Mbit/s)
 bash i2rt/scripts/reset_all_can.sh
 
-# Disable the motor timeout on both arms (default is too short for long sessions
-# and causes abrupt collapse during teleop / data collection / eval)
-python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_leader_l
-python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_follower_r
+# Enable the 400ms motor safety watchdog on both arms (saved to flash). On ctrl+C the
+# command stream stops and the arms auto-de-energize ~400ms later (LED green->red), instead
+# of holding torque and forcing a physical power-cut. The 250Hz control loop keeps the
+# watchdog fed during normal teleop / data collection / eval, so it never trips mid-run.
+python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_leader_l --timeout
+python i2rt/i2rt/motor_config_tool/set_timeout.py --channel can_follower_r --timeout
 ```
 
 ### 3. Reset Gripper Zero (only for the Linear gripper at max grip)
